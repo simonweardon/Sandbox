@@ -1,0 +1,13 @@
+{
+  "name": "pixel-route-1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A top-down pixel game in the style of the Game Boy Pokemon titles",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
