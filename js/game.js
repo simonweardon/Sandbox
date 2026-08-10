@@ -1,5 +1,5 @@
 /*
- * game.js — input, movement, camera and rendering.
+ * game.js — input, movement, camera, lighting and rendering.
  *
  * Everything is drawn to a 240x160 canvas (the GBA resolution) and then scaled
  * up by a whole number, which is what keeps the pixels square and sharp.
@@ -11,7 +11,7 @@ const VIEW_H = 160;
 const WALK_TIME = 0.22;  // seconds to cross one tile
 const RUN_TIME = 0.12;
 const TURN_TIME = 0.09;  // tap a direction to turn without stepping
-const ENCOUNTER_CHANCE = 0.09;
+const SPOOK_CHANCE = 0.12;
 
 const DIRS = {
   up: { dx: 0, dy: -1 },
@@ -20,15 +20,28 @@ const DIRS = {
   right: { dx: 1, dy: 0 },
 };
 
-const SPECIES = ['BULBASPRITE', 'CHARBYTE', 'SQUIRTPIXEL', 'PIKABIT', 'RATTATILE', 'ZUBYTE'];
+/* Muttered at you when you push through the cobwebs. */
+const SPOOKS = [
+  ['Something skitters away', 'under the floorboards.'],
+  ['The webs pull at your ears.', 'Nothing is holding them. Probably.'],
+  ['A door closes somewhere', 'you have already been.'],
+  ['For a moment there are', 'three sets of footsteps.'],
+  ['The cold goes straight', 'through your pinafore.'],
+];
 
 const screen = document.getElementById('screen');
 const ctx = screen.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
+/* Second buffer for the darkness pass: filled with gloom, then holes are
+   punched in it for each light before it's laid over the scene. */
+const lightBuffer = makeCanvas(VIEW_W, VIEW_H);
+const lightCtx = lightBuffer.getContext('2d');
+
 const tiles = buildTiles();
-const heroSheet = buildCharacter(HERO_PALETTE);
-const npcSheet = buildCharacter(NPC_PALETTE);
+const pieceSprites = buildPieces();
+const rabbitSheet = buildCharacter(RABBIT_PALETTE);
+const ghostFrames = buildGhost();
 
 const player = {
   x: PLAYER_START.x,
@@ -45,10 +58,11 @@ const player = {
 
 const state = {
   dialogue: null,   // { pages: [[line, line]], page: 0 }
-  flash: 0,         // seconds left on the encounter flash
-  banner: 2.6,      // seconds left on the "ROUTE 1" title card
-  waterFrame: 0,
-  waterTimer: 0,
+  found: 0,
+  finished: false,
+  chill: 0,         // seconds left on the cold-flash effect
+  banner: 3.2,      // seconds left on the title card
+  clock: 0,
   blink: 0,
 };
 
@@ -86,7 +100,7 @@ addEventListener('keyup', (e) => {
   if (key) keys[key] = false;
 });
 
-// Lose every held key when the tab goes away, or the player keeps walking.
+// Lose every held key when the tab goes away, or she keeps walking.
 addEventListener('blur', () => {
   for (const key of Object.keys(keys)) keys[key] = false;
 });
@@ -129,15 +143,47 @@ function facedTile() {
   return { x: player.x + dir.dx, y: player.y + dir.dy };
 }
 
+function openChest() {
+  if (state.found < PIECE_TOTAL) {
+    const left = PIECE_TOTAL - state.found;
+    openDialogue([
+      'The toy chest is empty.',
+      `${left} piece${left === 1 ? '' : 's'} of BUTTON still missing.`,
+    ]);
+    return;
+  }
+  state.finished = true;
+  openDialogue([
+    'You lay the pieces in the chest and',
+    'fit them together, one to the next.',
+    'Head, body, arm, leg, ribbon —',
+    'BUTTON is whole again.',
+    'She looks up at you, and the manor',
+    'lets out a long, tired breath.',
+    'Somewhere below, the front door',
+    'swings open onto the morning.',
+  ]);
+}
+
 function tryInteract() {
   const front = facedTile();
   const entity = entityAt(front.x, front.y);
-  if (!entity) return;
-  if (entity.kind === 'npc') {
-    // Turn to look at whoever is talking to them.
-    entity.facing = { up: 'down', down: 'up', left: 'right', right: 'left' }[player.facing];
+
+  if (entity) {
+    if (entity.kind === 'ghost') {
+      // Turn to look at whoever is talking to them.
+      entity.facing = { up: 'down', down: 'up', left: 'right', right: 'left' }[player.facing];
+      openDialogue(entity.lines);
+      return;
+    }
+    if (entity.kind === 'chest') {
+      openChest();
+      return;
+    }
   }
-  openDialogue(entity.lines);
+
+  const talk = TILE_TALK[tileAt(front.x, front.y)];
+  if (talk) openDialogue(talk);
 }
 
 /* --- Movement ------------------------------------------------------------- */
@@ -155,6 +201,20 @@ function canEnter(x, y) {
   return isWalkable(x, y) && !entityAt(x, y);
 }
 
+/* Pieces are picked up by walking onto them — no button required. */
+function collectAt(x, y) {
+  const piece = pieceAt(x, y);
+  if (!piece) return;
+  piece.taken = true;
+  state.found++;
+  const lines = [`You found ${piece.label}!`, piece.line];
+  if (piece.extra) lines.push(piece.extra);
+  if (state.found === PIECE_TOTAL) {
+    lines.push('That is all five.', 'Take her to the nursery chest.');
+  }
+  openDialogue(lines);
+}
+
 function updatePlayer(dt) {
   if (player.moving) {
     player.progress += dt / player.stepTime;
@@ -164,8 +224,9 @@ function updatePlayer(dt) {
       player.fromX = player.x;
       player.fromY = player.y;
       player.poseCycle = (player.poseCycle + 1) % 2;
-      if (tileAt(player.x, player.y) === ',' && Math.random() < ENCOUNTER_CHANCE) {
-        triggerEncounter();
+      collectAt(player.x, player.y);
+      if (!state.dialogue && tileAt(player.x, player.y) === 'w' && Math.random() < SPOOK_CHANCE) {
+        spook();
       }
     }
     return;
@@ -203,27 +264,21 @@ function updatePlayer(dt) {
   player.stepTime = keys.run ? RUN_TIME : WALK_TIME;
 }
 
-function triggerEncounter() {
-  const species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
-  state.flash = 0.55;
-  openDialogue([`A wild ${species} leapt out of`, 'the tall grass!']);
+function spook() {
+  state.chill = 0.6;
+  openDialogue(SPOOKS[Math.floor(Math.random() * SPOOKS.length)]);
 }
 
 function update(dt) {
+  state.clock += dt;
   state.blink += dt;
   state.banner = Math.max(0, state.banner - dt);
-  state.flash = Math.max(0, state.flash - dt);
-
-  state.waterTimer += dt;
-  if (state.waterTimer > 0.4) {
-    state.waterTimer = 0;
-    state.waterFrame = (state.waterFrame + 1) % tiles.water.length;
-  }
+  state.chill = Math.max(0, state.chill - dt);
 
   if (state.dialogue) {
     if (actionPressed) advanceDialogue();
     actionPressed = false;
-    return;   // the world holds still while someone is talking
+    return;   // the manor holds still while someone is talking
   }
 
   if (actionPressed) {
@@ -254,46 +309,90 @@ function variantFor(x, y, count) {
   return h % count;
 }
 
-function tileImage(char, x, y) {
-  switch (char) {
-    case '.': return tiles.grass[variantFor(x, y, tiles.grass.length)];
-    case ',': return tiles.grass[variantFor(x, y, tiles.grass.length)];
-    case '-': return tiles.path[variantFor(x, y, tiles.path.length)];
-    case '*': return tiles.flower;
-    case '#': return tiles.tree;
-    case '~': return tiles.water[state.waterFrame];
-    case 'o': return tiles.rock;
-    case 'f': return tiles.fence;
-    case '=': return tiles.sign;
-    case 'R': return tiles.roof;
-    case 'w': return tiles.wall;
-    case 'W': return tiles.window;
-    case 'D': return tiles.door;
-    default: return tiles.grass[0];
-  }
+/* Gold border along whichever edges of a carpet meet bare floor, so a block of
+   rug tiles reads as one rug rather than a stack of separate mats. */
+function drawRugTrim(x, y, sx, sy) {
+  const edge = (nx, ny) => tileAt(nx, ny) !== 'r';
+  ctx.fillStyle = '#c9a44a';
+  if (edge(x, y - 1)) ctx.fillRect(sx, sy, TILE, 1);
+  if (edge(x, y + 1)) ctx.fillRect(sx, sy + TILE - 1, TILE, 1);
+  if (edge(x - 1, y)) ctx.fillRect(sx, sy, 1, TILE);
+  if (edge(x + 1, y)) ctx.fillRect(sx + TILE - 1, sy, 1, TILE);
 }
 
-/* Foam where the water meets land, so the lake has a shoreline rather than a
-   hard rectangular edge. */
-function drawShore(x, y, sx, sy) {
-  ctx.fillStyle = '#a9dcf4';
-  if (tileAt(x, y - 1) !== '~') ctx.fillRect(sx, sy, TILE, 2);
-  if (tileAt(x, y + 1) !== '~') ctx.fillRect(sx, sy + TILE - 2, TILE, 2);
-  if (tileAt(x - 1, y) !== '~') ctx.fillRect(sx, sy, 2, TILE);
-  if (tileAt(x + 1, y) !== '~') ctx.fillRect(sx + TILE - 2, sy, 2, TILE);
+/* Same web on the same square in both the floor pass and the overlay pass. */
+function webFor(x, y) {
+  return tiles.cobweb[variantFor(x + 7, y, tiles.cobweb.length)];
+}
+
+function tileImage(char, x, y) {
+  switch (char) {
+    case 'r': return tiles.rug;
+    case '#': return tiles.wall;
+    case 'd': return tiles.doorway[variantFor(x, y, tiles.doorway.length)];
+    case 'B': return tiles.bookshelf[variantFor(x, y, tiles.bookshelf.length)];
+    case 'P': return tiles.portrait;
+    case 'T': return tiles.table;
+    case 'c': return tiles.candle;
+    case 'W': return tiles.window;
+    case 's': return tiles.stairs;
+    case 'C': return tiles.chest;
+    case 'D': return tiles.frontDoor;
+    default: return tiles.floor[variantFor(x, y, tiles.floor.length)];
+  }
 }
 
 function drawCharacter(sheet, facing, pose, screenX, screenY) {
   // The 16px sprite stands a few pixels proud of its tile, so it reads as
-  // being *in* the scene rather than pasted flat onto it.
+  // being *in* the room rather than pasted flat onto it.
   ctx.drawImage(sheet[facing][pose], Math.round(screenX), Math.round(screenY) - 5);
 }
 
-/* Standing still shows the neutral pose; walking alternates the two step poses,
-   one per tile, which is how the Game Boy games did it. */
+/* Standing still shows the neutral pose; walking alternates the two step
+   poses, one per tile, which is how the Game Boy games did it. */
 function playerPose() {
   if (!player.moving) return 0;
   return player.poseCycle === 0 ? 1 : 2;
+}
+
+/*
+ * The darkness pass. The manor is lit only by candles, windows, and whatever
+ * the rabbit can see around herself — so we fill a buffer with gloom, cut a
+ * soft hole for each light, and lay the result over the finished scene.
+ */
+function drawDarkness(camX, camY, pos, startX, startY, endX, endY) {
+  // Once BUTTON is whole the house eases up and the gloom thins out.
+  const gloom = state.finished ? 0.34 : 0.88;
+  lightCtx.globalCompositeOperation = 'source-over';
+  lightCtx.fillStyle = `rgba(10,8,20,${gloom})`;
+  lightCtx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  lightCtx.globalCompositeOperation = 'destination-out';
+  const hole = (cx, cy, radius) => {
+    const gradient = lightCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    gradient.addColorStop(0, 'rgba(0,0,0,1)');
+    gradient.addColorStop(0.55, 'rgba(0,0,0,0.75)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    lightCtx.fillStyle = gradient;
+    lightCtx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+  };
+
+  hole(pos.x - camX + TILE / 2, pos.y - camY + TILE / 2, state.finished ? 80 : 54);
+
+  for (let y = startY; y <= endY; y++) {
+    for (let x = startX; x <= endX; x++) {
+      const radius = LIGHTS[tileAt(x, y)];
+      if (!radius) continue;
+      // Candles gutter; moonlight through a window does not.
+      const flicker = tileAt(x, y) === 'c'
+        ? 1 + Math.sin(state.clock * 7 + x * 2.3 + y) * 0.06
+        : 1;
+      hole(x * TILE - camX + TILE / 2, y * TILE - camY + TILE / 2, radius * flicker);
+    }
+  }
+
+  lightCtx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(lightBuffer, 0, 0);
 }
 
 function render() {
@@ -306,58 +405,85 @@ function render() {
   const endX = Math.ceil((camX + VIEW_W) / TILE);
   const endY = Math.ceil((camY + VIEW_H) / TILE);
 
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = '#0a0814';
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  // Ground pass. Tall grass gets a plain grass base here; its blades are drawn
-  // again after the characters so you stand waist-deep in it.
+  // Floor pass. Cobwebs get plain boards here; their threads are drawn again
+  // after the characters so she wades through them.
   for (let y = startY; y <= endY; y++) {
     for (let x = startX; x <= endX; x++) {
       const char = tileAt(x, y);
       ctx.drawImage(tileImage(char, x, y), x * TILE - camX, y * TILE - camY);
-      if (char === ',') ctx.drawImage(tiles.tallGrass, x * TILE - camX, y * TILE - camY);
-      if (char === '~') drawShore(x, y, x * TILE - camX, y * TILE - camY);
+      if (char === 'w') ctx.drawImage(webFor(x, y), x * TILE - camX, y * TILE - camY);
+      if (char === 'r') drawRugTrim(x, y, x * TILE - camX, y * TILE - camY);
     }
+  }
+
+  // Pieces lying on the floor, with a slow glint so they can be spotted.
+  for (const piece of PIECES) {
+    if (piece.taken) continue;
+    if (piece.x < startX || piece.x > endX || piece.y < startY || piece.y > endY) continue;
+    const sx = piece.x * TILE - camX;
+    const sy = piece.y * TILE - camY;
+    ctx.drawImage(pieceSprites[piece.kind], sx, sy);
+    const twinkle = (Math.sin(state.clock * 2.5 + piece.x) + 1) / 2;
+    ctx.fillStyle = `rgba(255,246,214,${0.25 + twinkle * 0.6})`;
+    ctx.fillRect(sx + 12, sy + 3, 1, 1);
+    ctx.fillRect(sx + 11, sy + 4, 3, 1);
+    ctx.fillRect(sx + 12, sy + 5, 1, 1);
   }
 
   // Character pass, sorted by depth so lower sprites overlap higher ones.
   const actors = ENTITIES
-    .filter((e) => e.kind === 'npc')
-    .map((e) => ({ y: e.y, draw: () => drawCharacter(npcSheet, e.facing, 0, e.x * TILE - camX, e.y * TILE - camY) }));
+    .filter((e) => e.kind === 'ghost')
+    .map((e) => ({
+      y: e.y,
+      draw: () => {
+        // Ghosts drift up and down instead of walking.
+        const bob = Math.sin(state.clock * 2 + e.x) * 2;
+        const frame = Math.floor(state.clock * 3 + e.y) % ghostFrames.length;
+        ctx.globalAlpha = 0.78;
+        ctx.drawImage(ghostFrames[frame], e.x * TILE - camX, Math.round(e.y * TILE - camY - 5 + bob));
+        ctx.globalAlpha = 1;
+      },
+    }));
   actors.push({
     y: player.y,
-    draw: () => drawCharacter(heroSheet, player.facing, playerPose(), pos.x - camX, pos.y - camY),
+    draw: () => drawCharacter(rabbitSheet, player.facing, playerPose(), pos.x - camX, pos.y - camY),
   });
   actors.sort((a, b) => a.y - b.y);
   for (const actor of actors) actor.draw();
 
-  // Tall grass foreground: redraw the bottom half over anyone standing there.
+  // Cobweb foreground: redraw the lower threads over anyone standing in them.
   for (let y = startY; y <= endY; y++) {
     for (let x = startX; x <= endX; x++) {
-      if (tileAt(x, y) !== ',') continue;
+      if (tileAt(x, y) !== 'w') continue;
       const sx = x * TILE - camX;
       const sy = y * TILE - camY;
-      ctx.drawImage(tiles.tallGrass, 0, 8, TILE, 8, sx, sy + 8, TILE, 8);
+      ctx.drawImage(webFor(x, y), 0, 8, TILE, 8, sx, sy + 8, TILE, 8);
     }
   }
 
-  if (state.flash > 0) {
-    // Two quick strobes, fading out.
-    const pulse = Math.abs(Math.sin(state.flash * 18)) * (state.flash / 0.55);
-    ctx.fillStyle = `rgba(255,255,255,${pulse * 0.85})`;
+  drawDarkness(camX, camY, pos, startX, startY, endX, endY);
+
+  if (state.chill > 0) {
+    // A cold blue pulse rather than a bright flash.
+    const pulse = Math.abs(Math.sin(state.chill * 16)) * (state.chill / 0.6);
+    ctx.fillStyle = `rgba(150,190,230,${pulse * 0.5})`;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
 
+  drawCounter();
   if (state.banner > 0) drawBanner();
   if (state.dialogue) drawDialogue();
 }
 
 function panel(x, y, w, h) {
-  ctx.fillStyle = '#241b2f';
+  ctx.fillStyle = '#e8e2ee';
   ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = '#f8f4ec';
+  ctx.fillStyle = '#1c1526';
   ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
-  ctx.fillStyle = '#241b2f';
+  ctx.fillStyle = '#e8e2ee';
   ctx.fillRect(x + 4, y + 4, w - 8, 1);
   ctx.fillRect(x + 4, y + h - 5, w - 8, 1);
 }
@@ -366,7 +492,7 @@ function drawDialogue() {
   const box = { x: 6, y: 108, w: VIEW_W - 12, h: 46 };
   panel(box.x, box.y, box.w, box.h);
 
-  ctx.fillStyle = '#241b2f';
+  ctx.fillStyle = '#e8e2ee';
   ctx.font = '8px ui-monospace, monospace';
   ctx.textBaseline = 'top';
   const page = state.dialogue.pages[state.dialogue.page];
@@ -380,14 +506,24 @@ function drawDialogue() {
   }
 }
 
-function drawBanner() {
-  const alpha = Math.min(1, state.banner / 0.6);
-  ctx.globalAlpha = alpha;
-  panel(6, 6, 78, 22);
-  ctx.fillStyle = '#241b2f';
+/* How much of BUTTON you're carrying, always on screen. */
+function drawCounter() {
+  const w = 62;
+  panel(VIEW_W - w - 6, 6, w, 20);
+  ctx.fillStyle = '#e8e2ee';
   ctx.font = '8px ui-monospace, monospace';
   ctx.textBaseline = 'top';
-  ctx.fillText('ROUTE 1', 16, 13);
+  ctx.fillText(`PIECES ${state.found}/${PIECE_TOTAL}`, VIEW_W - w + 3, 12);
+}
+
+function drawBanner() {
+  const alpha = Math.min(1, state.banner / 0.8);
+  ctx.globalAlpha = alpha;
+  panel(6, 6, 108, 22);
+  ctx.fillStyle = '#e8e2ee';
+  ctx.font = '8px ui-monospace, monospace';
+  ctx.textBaseline = 'top';
+  ctx.fillText('ASHGROVE MANOR', 16, 13);
   ctx.globalAlpha = 1;
 }
 
@@ -412,7 +548,7 @@ resize();
 let last = performance.now();
 
 function frame(now) {
-  // Cap dt so a backgrounded tab doesn't teleport the player on return.
+  // Cap dt so a backgrounded tab doesn't teleport her on return.
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   update(dt);

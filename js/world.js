@@ -1,43 +1,43 @@
 /*
- * world.js — the map itself.
+ * world.js — Ashgrove Manor.
  *
  * One character per tile:
- *   .  grass          ,  tall grass     -  path        *  flowers
- *   #  tree           ~  water          o  rock        f  fence
- *   =  signpost       R  roof           w  wall        W  window
- *   D  door
+ *   .  floorboards   r  carpet      d  doorway    w  cobwebs
+ *   #  wall          B  bookshelf   P  portrait   T  table
+ *   c  candelabra    W  window      s  staircase  C  toy chest
+ *   D  front door
  */
 
 const MAP = [
   '########################################',
-  '#......................................#',
-  '#..,,,,,,,,,..............**...........#',
-  '#..,,,,,,,,,.............RRRRRR........#',
-  '#..,,,,,,,,,.............RRRRRR........#',
-  '#..,,,,,,,,,.............WwwDwW........#',
-  '#...........................-..........#',
-  '#.....=.....................-..........#',
-  '#...........................-..........#',
-  '#....------------------------..........#',
-  '#....-.................................#',
-  '#....-............~~~~~~~~~~~~.........#',
-  '#....-...........~~~~~~~~~~~~~~........#',
-  '#....-...........~~~~~~~~~~~~~~........#',
-  '#....-............~~~~~~~~~~~~.........#',
-  '#....-.............~~~~~~~~~...........#',
-  '#....-.................................#',
-  '#....--------------------..............#',
-  '#.......................-..............#',
-  '#oo.....................-..............#',
-  '#.......................-..............#',
-  '#...ffffffffff..........-..............#',
-  '#...f,,,,,,,,f..........-..............#',
-  '#...f,,,,,,,,f..........-..............#',
-  '#...f,,,,,,,,f..........-..............#',
-  '#...ffff..ffff..........-..............#',
-  '#..............***......-..............#',
-  '#.......................-..............#',
-  '#......................................#',
+  '########################################',
+  '############################W##W##W#####',
+  '##.BBBBBBBBBBB.#..ssss..#.............##',
+  '##.............#...rr...#.c.........c.##',
+  '##B............P...rr...P.............##',
+  '##B............#.c.rr.c.#...TTTTTTT...##',
+  '##B...TTTT.....d...rr...d...TTTTTTT...##',
+  '##B...TTTT.....#...rr...#.............##',
+  '##B............#...rr...#.............##',
+  '##..c.......c..#...rr...#.c.........c.##',
+  '##.............P...rr...P.............##',
+  '########d#######...rr...#######d########',
+  '##.................rr.................##',
+  '##.................rr.................##',
+  '########d#######...rr...#######d########',
+  '##.............#...rr...#.............##',
+  '##.c.........c.#.c.rr.c.#..........BB.##',
+  '##.............#...rr...#......C......##',
+  '##..wwwwwwwww..#...rr...#.............##',
+  '##..wwwwwwwww..d...rr...d....rrrrr....##',
+  '##W.wwwwwwwww..#...rr...#....rrrrr....W#',
+  '##W.wwwwwwwww..#...rr...#....rrrrr....W#',
+  '##..wwwwwwwww..P...rr...P....rrrrr....##',
+  '##..wwwwwwwww..#...rr...#.............##',
+  '##.............#.c.rr.c.#.............##',
+  '##...TT........#...rr...#.c.........c.##',
+  '##.............#...rr...#.............##',
+  '###################DD###################',
   '########################################',
 ];
 
@@ -50,8 +50,11 @@ MAP.forEach((row, y) => {
   }
 });
 
-/* Anything not listed here is walkable open ground. */
-const SOLID = new Set(['#', '~', 'o', 'f', '=', 'R', 'w', 'W', 'D']);
+/* Anything not listed here is walkable floor. */
+const SOLID = new Set(['#', 'B', 'P', 'T', 'c', 'W', 's', 'C', 'D']);
+
+/* Tiles that cast light into the darkness pass, and how far. */
+const LIGHTS = { c: 46, W: 34 };
 
 function tileAt(x, y) {
   if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return '#';
@@ -62,28 +65,73 @@ function isWalkable(x, y) {
   return !SOLID.has(tileAt(x, y));
 }
 
-/* Things you can face and press A at. Signs and the door are solid tiles;
-   the NPC is a walking body that also blocks its own square. */
+/* Flavour for the furniture — press A facing any of these. */
+const TILE_TALK = {
+  B: ['Damp books, none of them titled.', 'The spines are warm to the touch.'],
+  P: ['A painted lady in a grey dress.', 'Her eyes are following your ears.'],
+  T: ['Laid for a dinner nobody came to.', 'The plates are full of dust.'],
+  c: ['The candles burn but never', 'get any shorter.'],
+  W: ['Moonlight, and your own reflection', 'waving back a moment too late.'],
+  s: ['The staircase goes up four steps', 'and then simply stops.'],
+  D: ['The front door will not open.', 'It never does, until it wants to.'],
+};
+
+/* The five pieces of BUTTON, scattered one to a room. Walk over one to take
+   it — no need to press anything. */
+const PIECES = [
+  { x: 12, y: 9, kind: 'head', label: "BUTTON's head",
+    line: 'Her painted eyes are still cheerful.' },
+  { x: 30, y: 9, kind: 'arm', label: "BUTTON's arm",
+    line: 'It was under the dinner table.' },
+  { x: 7, y: 22, kind: 'leg', label: "BUTTON's leg",
+    line: 'Wound about with old cobweb.' },
+  { x: 35, y: 25, kind: 'body', label: "BUTTON's body",
+    line: 'Her blue dress, hardly torn at all.' },
+  { x: 17, y: 4, kind: 'ribbon', label: "BUTTON's ribbon",
+    line: 'It was tied to the bannister,', extra: 'in a bow you did not tie.' },
+];
+
+const PIECE_TOTAL = PIECES.length;
+
+/* Ghosts and the toy chest. Ghosts block their square, so you talk to them
+   rather than walk through them. */
 const ENTITIES = [
   {
-    x: 6, y: 7, kind: 'sign',
-    lines: ['ROUTE 1 — the tall grass is', 'crawling with wild PIXELMON.'],
-  },
-  {
-    x: 28, y: 5, kind: 'door',
-    lines: ["It's locked. Whoever lives here", 'is out catching PIXELMON.'],
-  },
-  {
-    x: 12, y: 10, kind: 'npc', facing: 'down',
+    x: 20, y: 24, kind: 'ghost', facing: 'down',
     lines: [
-      'Hey! Hold SHIFT and you can run.',
-      'Beats walking every step of',
-      'this route, believe me.',
+      'Oh — a little rabbit, all alone.',
+      'The house took your doll apart and',
+      'hid the pieces in its rooms.',
+      'Find all five and put her together.',
     ],
   },
   {
-    x: 8, y: 23, kind: 'npc', facing: 'left',
-    lines: ['This patch is fenced off so the', 'wild ones stay put. Mostly.'],
+    x: 5, y: 6, kind: 'ghost', facing: 'down',
+    lines: [
+      'I have read every book here twice.',
+      'Something small and pale is shelved',
+      'in the west wall, between the poetry.',
+    ],
+  },
+  {
+    x: 29, y: 10, kind: 'ghost', facing: 'left',
+    lines: [
+      'We dine at eight. We have dined at',
+      'eight for ninety years.',
+      'Look beneath the table, child.',
+    ],
+  },
+  {
+    x: 3, y: 18, kind: 'ghost', facing: 'right',
+    lines: [
+      'Mind the webs in the old glasshouse.',
+      'The spiders here collect what they',
+      'like, and they liked her shoe.',
+    ],
+  },
+  {
+    x: 31, y: 18, kind: 'chest',
+    lines: ['A toy chest, lid thrown open.'],
   },
 ];
 
@@ -91,4 +139,8 @@ function entityAt(x, y) {
   return ENTITIES.find((e) => e.x === x && e.y === y) || null;
 }
 
-const PLAYER_START = { x: 5, y: 10, facing: 'down' };
+function pieceAt(x, y) {
+  return PIECES.find((p) => !p.taken && p.x === x && p.y === y) || null;
+}
+
+const PLAYER_START = { x: 19, y: 27, facing: 'up' };

@@ -1,8 +1,8 @@
 {
-  "name": "pixel-route-1",
-  "version": "1.0.0",
+  "name": "ashgrove-manor",
+  "version": "2.0.0",
   "private": true,
-  "description": "A top-down pixel game in the style of the Game Boy Pokemon titles",
+  "description": "A haunted-house pixel game: a little white rabbit hunts the scattered pieces of her doll",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

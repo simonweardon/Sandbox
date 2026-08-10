@@ -4,7 +4,7 @@
  * Sprites are written as rows of single-character palette keys, so the art
  * stays readable and editable right here in the source:
  *
- *   '..KKKK..'     '.' is transparent, every other letter is a palette entry
+ *   '..KWWWWK..'   '.' is transparent, every other letter is a palette entry
  *
  * Each drawing is baked once into an offscreen 16x16 canvas at load time; the
  * game then blits those canvases, never the character data.
@@ -12,94 +12,112 @@
 
 const TILE = 16;
 
-/* Palette for the player. Swap the values to re-skin a character. */
-const HERO_PALETTE = {
-  K: '#241b2f', // outline
-  C: '#e0403c', // cap
-  H: '#3a2a1e', // hair
-  S: '#f2c79b', // skin
-  B: '#3b7dd8', // shirt
-  P: '#3c4166', // trousers
-  O: '#f2f2f2', // shoes
+/* Our heroine: a small white rabbit in a red pinafore. */
+const RABBIT_PALETTE = {
+  K: '#2a2033', // outline
+  W: '#f6f2f7', // fur
+  P: '#e8a0b8', // inner ear and nose
+  D: '#b8465e', // pinafore
+  S: '#403354', // shoes
 };
 
-/* The rival/NPC is the same art with different colours — exactly how the
-   Game Boy games got a second trainer out of one sprite sheet. */
-const NPC_PALETTE = {
-  K: '#241b2f',
-  C: '#7d55c7',
-  H: '#20304a',
-  S: '#d8a173',
-  B: '#4fae6a',
-  P: '#3a3f4f',
-  O: '#ffd257',
+const GHOST_PALETTE = {
+  K: '#5f6f8a', // faint outline
+  G: '#cfe0ef', // body
+  P: '#9fb4cc', // mouth
 };
 
-/* --- Character art -------------------------------------------------------
-   Bodies are 13 rows (head + torso); the bottom 3 rows come from a leg set,
-   so one body serves the whole walk cycle. */
+/* --- The rabbit -----------------------------------------------------------
+   Bodies are 13 rows (ears, head, pinafore); the bottom 3 rows come from a leg
+   set, so one body serves the whole walk cycle. */
 
 const BODY_DOWN = [
-  '................',
-  '....KKKKKKK.....',
-  '...KCCCCCCCK....',
-  '..KCCCCCCCCCK...',
-  '..KKKKKKKKKKK...',
-  '..KHHSSSSSHHK...',
-  '..KSSSSSSSSSK...',
-  '..KSKKSSSKKSK...',
-  '..KSSSSSSSSSK...',
-  '...KSSSSSSSK....',
-  '...KKBBBBBKK....',
-  '..KSKBBBBBKSK...',
-  '..KSKBBBBBKSK...',
+  '....KK...KK.....',
+  '...KWWK.KWWK....',
+  '...KWPK.KWPK....',
+  '...KWWK.KWWK....',
+  '..KKWWKKKWWKK...',
+  '..KWWWWWWWWWK...',
+  '..KWWWWWWWWWK...',
+  '..KWKKWWWKKWK...',
+  '..KWWWPPPWWWK...',
+  '...KWWWWWWWK....',
+  '...KKDDDDDKK....',
+  '..KWKDDDDDKWK...',
+  '..KWKDDDDDKWK...',
 ];
 
+/* Seen from behind: the ears show their backs, and there's no face. */
 const BODY_UP = [
-  '................',
-  '....KKKKKKK.....',
-  '...KCCCCCCCK....',
-  '..KCCCCCCCCCK...',
-  '..KKKKKKKKKKK...',
-  '..KHHHHHHHHHK...',
-  '..KHHHHHHHHHK...',
-  '..KHHHHHHHHHK...',
-  '..KHHHHHHHHHK...',
-  '...KHHHHHHHK....',
-  '...KKBBBBBKK....',
-  '..KSKBBBBBKSK...',
-  '..KSKBBBBBKSK...',
+  '....KK...KK.....',
+  '...KWWK.KWWK....',
+  '...KWWK.KWWK....',
+  '...KWWK.KWWK....',
+  '..KKWWKKKWWKK...',
+  '..KWWWWWWWWWK...',
+  '..KWWWWWWWWWK...',
+  '..KWWWWWWWWWK...',
+  '..KWWWWWWWWWK...',
+  '...KWWWWWWWK....',
+  '...KKDDDDDKK....',
+  '..KWKDDDDDKWK...',
+  '..KWKDDDDDKWK...',
 ];
 
 /* Drawn facing left; the right-facing sheet is this one mirrored. */
 const BODY_SIDE = [
-  '................',
-  '...KKKKKK.......',
-  '..KCCCCCCK......',
-  '.KCCCCCCCCK.....',
-  '.KKKKKKKKKK.....',
-  '.KSSSSSSSHK.....',
-  '.KSKSSSSSHK.....',
-  '.KSSSSSSSHK.....',
-  '..KSSSSSSHK.....',
-  '...KSSSSSK......',
-  '...KBBBBK.......',
-  '..KBBBBBK.......',
-  '..KSBBBBK.......',
+  '.....KK.KK......',
+  '....KWWKWWK.....',
+  '....KWWKWWK.....',
+  '....KWWKWWK.....',
+  '...KKWWWWWKK....',
+  '..KWWWWWWWK.....',
+  '..KWKWWWWWK.....',
+  '..KPWWWWWWK.....',
+  '...KWWWWWWK.....',
+  '....KWWWWWK.....',
+  '....KDDDDK......',
+  '...KDDDDDK......',
+  '...KWDDDDK......',
 ];
 
 /* Leg sets: [standing, legs together, legs apart]. Alternating the last two
-   with a stand in between is the classic four-beat overworld walk. */
+   is the walk cycle. */
 const LEGS_FRONT = [
-  ['...KKPPPPPKK....', '....KPPKPPK.....', '....KOOKOOK.....'],
-  ['...KKPPPPPKK....', '....KPPPPPK.....', '.....KOOOK......'],
-  ['...KKPPPPPKK....', '...KPPK.KPPK....', '...KOOK.KOOK....'],
+  ['...KKDDDDDKK....', '....KDDKDDK.....', '....KSSKSSK.....'],
+  ['...KKDDDDDKK....', '....KDDDDDK.....', '.....KSSSK......'],
+  ['...KKDDDDDKK....', '...KDDK.KDDK....', '...KSSK.KSSK....'],
 ];
 
 const LEGS_SIDE = [
-  ['....KPPPPK......', '....KPPKPK......', '....KOOKOK......'],
-  ['....KPPPPK......', '...KPPPPK.......', '...KOOOK........'],
-  ['....KPPPPK......', '.....KPPPPK.....', '.....KOOOK......'],
+  ['...KDDDDK.......', '....KDDKDK......', '....KSSKSK......'],
+  ['...KDDDDK.......', '...KDDKDK.......', '...KSSKSK.......'],
+  ['...KDDDDK.......', '.....KDDKDK.....', '.....KSSKSK.....'],
+];
+
+/* --- Ghosts ---------------------------------------------------------------
+   No walk cycle — they drift. Two frames differing only in the wisps at the
+   hem, which the renderer alternates while bobbing them up and down. */
+
+const GHOST_BODY = [
+  '................',
+  '.....KKKKK......',
+  '...KKGGGGGKK....',
+  '..KGGGGGGGGGK...',
+  '..KGGGGGGGGGK...',
+  '..KGKKGGGKKGK...',
+  '..KGKKGGGKKGK...',
+  '..KGGGGGGGGGK...',
+  '..KGGGGPPGGGK...',
+  '..KGGGGGGGGGK...',
+  '..KGGGGGGGGGK...',
+  '..KGGGGGGGGGK...',
+  '..KGGGGGGGGGK...',
+];
+
+const GHOST_HEMS = [
+  ['..KGGKGGGKGGK...', '..KGK.KGK.KGK...', '..KKK...KKK.....'],
+  ['..KGGGKGKGGGK...', '..KGK.KGK.KGK...', '.....KKK...KKK..'],
 ];
 
 /* --- Baking --------------------------------------------------------------- */
@@ -164,4 +182,8 @@ function buildCharacter(palette) {
   }
   sheet.right = sheet.left.map(flipped);
   return sheet;
+}
+
+function buildGhost() {
+  return GHOST_HEMS.map((hem) => bake(GHOST_BODY.concat(hem), GHOST_PALETTE));
 }

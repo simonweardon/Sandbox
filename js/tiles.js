@@ -1,9 +1,10 @@
 /*
- * tiles.js — the 16x16 terrain tiles.
+ * tiles.js — the 16x16 mansion tiles and the doll pieces.
  *
- * Unlike the characters these are drawn procedurally: a base fill plus
- * scattered detail pixels from a seeded RNG, so each tile still lands on exact
- * pixel boundaries but the code stays short. Everything is baked once at load.
+ * Unlike the characters these are drawn procedurally: a base fill plus detail
+ * pixels, some of them scattered by a seeded RNG. Everything is baked once at
+ * load. Colours run warm-but-dim, because the renderer lays a darkness pass
+ * over the whole scene and only candles and windows push it back.
  */
 
 /* Tiny deterministic RNG (mulberry32) — same seed, same speckles, every run. */
@@ -35,218 +36,307 @@ function fill(ctx, colour) {
 }
 
 const C = {
-  grass: '#5fae4e',
-  grassDark: '#4a9440',
-  grassLight: '#7cc45e',
-  tallGrass: '#3f8c3a',
-  tallGrassDark: '#2f6d2d',
-  dirt: '#d8bd8a',
-  dirtDark: '#c2a473',
-  water: '#4a8fd4',
-  waterDark: '#3a72b4',
-  waterLight: '#7fb8ea',
-  bark: '#7a5230',
-  barkDark: '#5c3d23',
-  leaf: '#2f7a3b',
-  leafDark: '#24602f',
-  leafLight: '#41a04c',
-  rock: '#9a9aa8',
-  rockDark: '#70707e',
-  wood: '#a5713f',
-  woodDark: '#7a5230',
-  board: '#e8d5a8',
-  roof: '#c8543f',
-  roofDark: '#a03f2f',
-  wall: '#efe0c4',
-  wallDark: '#cdb894',
-  door: '#7a5230',
-  outline: '#241b2f',
+  plank: '#6b4f3a',
+  plankDark: '#553d2c',
+  plankLight: '#7c5c43',
+  wall: '#3f3350',
+  wallStripe: '#4a3d5e',
+  wallDark: '#2a2033',
+  rug: '#8c2f3f',
+  rugDark: '#6f2532',
+  rugTrim: '#c9a44a',
+  wood: '#5a3f2c',
+  woodDark: '#422e20',
+  woodLight: '#75523a',
+  gold: '#c9a44a',
+  canvasDark: '#241b2f',
+  pale: '#d8cbb8',
+  web: 'rgba(226,226,244,0.42)',
+  moon: '#9fc6e8',
+  moonDim: '#6d90b4',
+  flame: '#ffc357',
+  flameHot: '#fff0c0',
+  wax: '#efe3c8',
+  outline: '#1c1526',
 };
 
-/* Grass with a few tufts. Three variants get sprinkled across the map so large
-   fields don't look like graph paper. */
-function grassTile(seed) {
+/* Floorboards. The seams run the full height at fixed columns, so boards join
+   up across tiles into long runs — stagger them and the floor reads as
+   brickwork instead. Three variants vary only the grain. */
+function floorTile(seed) {
   return drawTile((ctx, px) => {
-    fill(ctx, C.grass);
+    fill(ctx, C.plank);
     const rand = rng(seed);
-    // A few small blades rather than heavy speckle — at 16px, less is calmer.
+    for (const x of [0, 5, 11]) {
+      px(x, 0, C.plankDark, 1, TILE);
+      px(x + 1, 0, C.plankLight, 1, TILE);
+    }
+    // Grain running along the boards.
     for (let i = 0; i < 3; i++) {
-      const x = 1 + Math.floor(rand() * (TILE - 3));
-      const y = 1 + Math.floor(rand() * (TILE - 3));
-      px(x, y, C.grassDark, 2, 1);
-      px(x + 1, y + 1, C.grassDark);
+      const x = 2 + Math.floor(rand() * 13);
+      const y = Math.floor(rand() * 12);
+      px(x, y, C.plankDark, 1, 3 + Math.floor(rand() * 3));
     }
-    px(2 + Math.floor(rand() * 10), 2 + Math.floor(rand() * 10), C.grassLight, 2, 1);
+    // A butt joint on one board, often enough to break the run but rarely
+    // enough that it never looks like a grid.
+    if (rand() > 0.45) {
+      const boardStart = [1, 6, 12][Math.floor(rand() * 3)];
+      px(boardStart, Math.floor(rand() * TILE), C.plankDark, 4, 1);
+    }
   });
 }
 
-function tallGrassTile() {
+/* The rug's centre only — its gold border is painted at render time on the
+   edges that actually face the floor, so a run of tiles reads as one rug. */
+function rugTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.grass);
-    // Rows of chevron blades, offset every other row.
-    for (let row = 0; row < 3; row++) {
-      const y = 3 + row * 5;
-      const offset = row % 2 ? 2 : 0;
-      for (let x = offset; x < TILE; x += 4) {
-        px(x, y, C.tallGrass, 1, 3);
-        px(x + 1, y + 1, C.tallGrassDark, 1, 2);
-        px(x - 1, y + 1, C.tallGrass, 1, 2);
-      }
-    }
+    fill(ctx, C.rug);
+    const diamond = [[7, 4, 2], [6, 5, 4], [5, 6, 6], [6, 7, 4], [7, 8, 2]];
+    for (const [x, y, w] of diamond) px(x, y, C.rugTrim, w, 1);
+    px(7, 6, C.rugDark, 2, 1);
+    // Weave, so the pile isn't a flat colour.
+    px(2, 11, C.rugDark, 3, 1);
+    px(11, 11, C.rugDark, 3, 1);
+    px(1, 2, C.rugDark, 2, 1);
+    px(13, 13, C.rugDark, 2, 1);
   });
 }
 
-function pathTile(seed) {
+function wallTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.dirt);
-    const rand = rng(seed);
-    for (let i = 0; i < 10; i++) {
-      px(Math.floor(rand() * TILE), Math.floor(rand() * TILE), C.dirtDark);
-    }
+    fill(ctx, C.wall);
+    // Striped wallpaper with a dark rail along the bottom.
+    for (let x = 1; x < TILE; x += 4) px(x, 0, C.wallStripe, 2, 12);
+    px(0, 12, C.wallDark, TILE, 4);
+    px(0, 12, C.woodDark, TILE, 1);
   });
 }
 
-function flowerTile(seed) {
-  const base = grassTile(seed);
+/* An open doorway: floor underneath, jambs either side. */
+function doorwayTile(seed) {
+  const base = floorTile(seed);
   return drawTile((ctx, px) => {
     ctx.drawImage(base, 0, 0);
-    const petals = ['#f2f2f2', '#f5c542', '#e8697d'];
-    const rand = rng(seed + 99);
-    for (let i = 0; i < 3; i++) {
-      const x = 2 + Math.floor(rand() * (TILE - 5));
-      const y = 2 + Math.floor(rand() * (TILE - 5));
-      const colour = petals[Math.floor(rand() * petals.length)];
-      px(x + 1, y, colour);
-      px(x, y + 1, colour);
-      px(x + 2, y + 1, colour);
-      px(x + 1, y + 2, colour);
-      px(x + 1, y + 1, '#f5c542');
-    }
+    px(0, 0, C.woodDark, 2, TILE);
+    px(TILE - 2, 0, C.woodDark, 2, TILE);
+    px(0, 0, C.wood, 1, TILE);
+    px(TILE - 2, 0, C.wood, 1, TILE);
   });
 }
 
-/* The canopy runs edge to edge so a row of trees reads as one dense treeline
-   instead of a line of lollipops; only the very bottom shows trunk and grass. */
-function treeTile() {
+function bookshelfTile(seed) {
   return drawTile((ctx, px) => {
-    fill(ctx, C.leaf);
-    // Clumps of foliage: lit on the top-left, shaded on the bottom-right.
-    const clumps = [
-      [1, 1, C.leafLight], [6, 0, C.leafLight], [11, 2, C.leafLight],
-      [3, 5, C.leafLight], [9, 6, C.leafLight], [13, 8, C.leafLight],
-      [0, 8, C.leafDark], [5, 9, C.leafDark], [10, 12, C.leafDark],
-      [2, 12, C.leafDark], [12, 4, C.leafDark],
-    ];
-    for (const [x, y, colour] of clumps) {
-      px(x + 1, y, colour, 2, 1);
-      px(x, y + 1, colour, 4, 1);
-      px(x + 1, y + 2, colour, 2, 1);
-    }
-    px(0, 15, C.leafDark, TILE, 1);   // shadow line along the bottom edge
-  });
-}
-
-/* Water gets three frames; the sparkles march sideways to suggest a current. */
-function waterTile(frame) {
-  return drawTile((ctx, px) => {
-    fill(ctx, C.water);
-    for (let y = 2; y < TILE; y += 5) {
-      const shift = ((frame * 3) + y * 2) % TILE;
-      for (let i = 0; i < 2; i++) {
-        const x = (shift + i * 8) % TILE;
-        px(x, y, C.waterLight, 3, 1);
-        px((x + 4) % TILE, y + 2, C.waterDark, 2, 1);
+    fill(ctx, C.woodDark);
+    const spines = ['#7a3a4a', '#3a5a7a', '#6a5a30', '#4a3a6a', '#3a6a4a'];
+    const rand = rng(seed);
+    for (let shelf = 0; shelf < 3; shelf++) {
+      const y = 1 + shelf * 5;
+      let x = 1;
+      while (x < TILE - 1) {
+        const w = 1 + Math.floor(rand() * 2);
+        const h = 3 + Math.floor(rand() * 2);
+        px(x, y + (4 - h), spines[Math.floor(rand() * spines.length)], w, h);
+        x += w + 1;
       }
+      px(0, y + 4, C.wood, TILE, 1);   // shelf board
     }
   });
 }
 
-function rockTile() {
+/* A portrait whose sitter has seen better centuries. */
+function portraitTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.grass);
-    const body = [
-      [5, 3, 6], [3, 4, 10], [2, 5, 12], [2, 6, 12],
-      [1, 7, 14], [1, 8, 14], [2, 9, 12], [2, 10, 12], [3, 11, 10],
-    ];
-    for (const [x, y, w] of body) px(x, y, C.rock, w, 1);
-    px(4, 4, '#c0c0cc', 4, 1);
-    px(3, 5, '#c0c0cc', 3, 1);
-    px(3, 10, C.rockDark, 9, 1);
-    px(4, 11, C.rockDark, 8, 1);
+    fill(ctx, C.wall);
+    px(2, 1, C.gold, 12, 14);
+    px(3, 2, C.canvasDark, 10, 12);
+    // A pale face: two dark eyes and not much else.
+    px(5, 4, C.pale, 6, 7);
+    px(6, 6, C.canvasDark, 1, 2);
+    px(9, 6, C.canvasDark, 1, 2);
+    px(6, 9, C.canvasDark, 4, 1);
+    px(4, 11, '#2f2438', 8, 3);   // shoulders in shadow
   });
 }
 
-function fenceTile() {
+/* A polished tabletop seen from above: flat, with a lit front edge and a
+   shadow under the far one. Kept plain so a run of them reads as one table. */
+function tableTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.grass);
-    px(0, 6, C.woodDark, TILE, 2);   // rail
-    px(0, 6, C.wood, TILE, 1);
-    px(3, 3, C.woodDark, 3, 11);     // post
-    px(3, 3, C.wood, 1, 11);
-    px(11, 3, C.woodDark, 3, 11);
-    px(11, 3, C.wood, 1, 11);
+    fill(ctx, C.wood);
+    px(0, 0, C.woodDark, TILE, 2);
+    px(0, 2, C.woodLight, TILE, 1);
+    px(0, TILE - 2, C.woodDark, TILE, 2);
+    px(0, TILE - 3, C.woodLight, TILE, 1);
+    // A little grain along the length, nothing that reads as a slat.
+    px(3, 6, C.woodLight, 6, 1);
+    px(9, 10, C.woodLight, 5, 1);
+    px(2, 12, C.woodDark, 4, 1);
   });
 }
 
-function signTile() {
+/* Candelabra — also a light source, so the flame is drawn bright. */
+function candleTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.grass);
-    px(7, 9, C.woodDark, 2, 6);          // post
-    px(2, 2, C.outline, 12, 9);          // board border
-    px(3, 3, C.board, 10, 7);
-    for (let i = 0; i < 3; i++) px(4, 5 + i * 2, C.woodDark, 8 - i * 2, 1);
+    fill(ctx, C.plank);
+    px(0, 5, C.plankDark, TILE, 1);
+    px(6, 9, C.woodDark, 4, 6);     // stand
+    px(5, 14, C.woodDark, 6, 2);
+    px(7, 5, C.wax, 2, 5);          // candle
+    px(4, 7, C.wax, 2, 3);
+    px(10, 7, C.wax, 2, 3);
+    px(7, 3, C.flame, 2, 2);        // flames
+    px(7, 2, C.flameHot, 2, 1);
+    px(4, 5, C.flame, 2, 2);
+    px(10, 5, C.flame, 2, 2);
   });
 }
 
-function roofTile() {
+function windowTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.roof);
-    for (let y = 0; y < TILE; y += 4) {
-      px(0, y, C.roofDark, TILE, 1);
-      for (let x = (y % 8 ? 2 : 0); x < TILE; x += 4) px(x, y + 1, C.roofDark, 1, 3);
+    fill(ctx, C.wall);
+    px(2, 1, C.woodDark, 12, 13);
+    px(3, 2, C.moonDim, 10, 11);
+    px(3, 2, C.moon, 10, 5);        // moonlight catching the upper panes
+    px(8, 2, C.woodDark, 1, 11);    // mullions
+    px(3, 7, C.woodDark, 10, 1);
+  });
+}
+
+function stairsTile() {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.woodDark);
+    for (let i = 0; i < 4; i++) {
+      const y = i * 4;
+      px(0, y, C.wood, TILE, 3);
+      px(0, y + 3, C.outline, TILE, 1);
     }
+    // The dark at the top of the flight, where the light gives up.
+    px(0, 0, 'rgba(20,15,28,0.55)', TILE, 5);
   });
 }
 
-function wallTile(withWindow) {
+/* The nursery toy chest — where the doll is meant to live. */
+function chestTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.wall);
-    px(0, 0, C.wallDark, TILE, 1);
-    px(0, TILE - 1, C.wallDark, TILE, 1);
-    if (!withWindow) return;
-    px(4, 4, C.outline, 8, 7);
-    px(5, 5, '#8fd0ef', 6, 5);
-    px(8, 5, C.wallDark, 1, 5);   // window frame cross-pieces
-    px(5, 7, C.wallDark, 6, 1);
+    fill(ctx, C.plank);
+    px(0, 2, C.outline, TILE, 13);
+    px(1, 3, C.woodLight, 14, 5);   // open lid, catching what light there is
+    px(1, 8, C.wood, 14, 6);
+    px(0, 8, C.outline, TILE, 1);
+    px(2, 9, '#2b2036', 12, 4);     // the dark inside
+    px(7, 7, C.gold, 2, 3);         // latch
+    px(2, 3, C.gold, 1, 11);        // corner bands
+    px(13, 3, C.gold, 1, 11);
   });
 }
 
-function doorTile() {
+/* The front door: locked, of course. */
+function frontDoorTile() {
   return drawTile((ctx, px) => {
-    fill(ctx, C.wall);
-    px(3, 1, C.outline, 10, 15);
-    px(4, 2, C.door, 8, 14);
-    px(5, 3, C.woodDark, 6, 1);
-    px(5, 8, C.woodDark, 6, 1);
-    px(10, 9, '#f5c542', 1, 2);  // handle
+    fill(ctx, C.wallDark);
+    px(1, 0, C.woodDark, 14, TILE);
+    px(2, 1, C.wood, 12, 14);
+    px(2, 1, C.woodDark, 12, 1);
+    px(4, 3, C.woodDark, 8, 5);
+    px(4, 9, C.woodDark, 8, 5);
+    px(12, 8, C.gold, 2, 2);        // handle
   });
+}
+
+/*
+ * Cobwebs, drawn as a transparent overlay so they can also be laid over the
+ * player's legs — she wades through them the way you'd wade through long
+ * grass. Three densities, scattered by tile position: a full corner web, a few
+ * strands, and the odd wisp. All faint, or a webbed room turns into a wall of
+ * white lattice.
+ */
+function cobwebTile(density) {
+  const canvas = makeCanvas(TILE, TILE);
+  const ctx = canvas.getContext('2d');
+  const px = (x, y) => {
+    ctx.fillStyle = C.web;
+    ctx.fillRect(x, y, 1, 1);
+  };
+  // Anchored in the top-left corner, so neighbouring webs knit together.
+  const spokes = [[0, Math.PI / 4, Math.PI / 2], [Math.PI / 8, (3 * Math.PI) / 8], [Math.PI / 4]][density];
+  const arcs = [[5, 10], [8], [11]][density];
+  const reach = [16, 13, 8][density];
+
+  for (const angle of spokes) {
+    for (let r = 1; r < reach; r++) {
+      px(Math.round(Math.cos(angle) * r), Math.round(Math.sin(angle) * r));
+    }
+  }
+  for (const r of arcs) {
+    for (let t = 0; t <= Math.PI / 2; t += 0.06) {
+      px(Math.round(Math.cos(t) * r), Math.round(Math.sin(t) * r));
+    }
+  }
+  return canvas;
+}
+
+/* --- The doll, in pieces --------------------------------------------------
+   Small sprites that sit on the floor. Each is drawn with a bright pixel or
+   two so it still catches the eye through the dark. */
+
+function pieceSprite(paint) {
+  return drawTile((ctx, px) => paint(px));
+}
+
+function buildPieces() {
+  return {
+    head: pieceSprite((px) => {
+      px(5, 5, C.outline, 6, 7);
+      px(6, 6, '#f0dcc6', 4, 5);
+      px(6, 5, '#c96f4a', 4, 1);   // painted hair
+      px(6, 8, C.outline, 1, 1);   // eyes
+      px(9, 8, C.outline, 1, 1);
+      px(7, 10, '#c4566a', 2, 1);  // mouth
+    }),
+    arm: pieceSprite((px) => {
+      px(4, 7, C.outline, 9, 4);
+      px(5, 8, '#f0dcc6', 7, 2);
+      px(11, 7, C.outline, 3, 4);
+      px(11, 8, '#e8cdb2', 2, 2);  // little hand
+    }),
+    leg: pieceSprite((px) => {
+      px(6, 4, C.outline, 4, 9);
+      px(7, 5, '#f0dcc6', 2, 6);
+      px(5, 11, C.outline, 6, 3);
+      px(6, 12, '#5a4a7a', 4, 1);  // shoe
+    }),
+    body: pieceSprite((px) => {
+      px(5, 4, C.outline, 6, 3);
+      px(4, 6, C.outline, 8, 8);
+      px(6, 5, '#f0dcc6', 4, 2);
+      px(5, 7, '#7aa0c4', 6, 6);   // blue dress
+      px(5, 9, '#a8c8e4', 6, 1);
+    }),
+    ribbon: pieceSprite((px) => {
+      px(3, 6, C.outline, 10, 5);
+      px(4, 7, '#c4566a', 3, 3);
+      px(9, 7, '#c4566a', 3, 3);
+      px(7, 7, '#8f3348', 2, 3);   // knot
+      px(4, 8, '#e07a8e', 3, 1);
+    }),
+  };
 }
 
 /* Everything the renderer needs, baked and ready to blit. */
 function buildTiles() {
   return {
-    grass: [grassTile(1), grassTile(2), grassTile(3)],
-    tallGrass: tallGrassTile(),
-    path: [pathTile(11), pathTile(12), pathTile(13)],
-    flower: flowerTile(7),
-    tree: treeTile(),
-    water: [waterTile(0), waterTile(1), waterTile(2)],
-    rock: rockTile(),
-    fence: fenceTile(),
-    sign: signTile(),
-    roof: roofTile(),
-    wall: wallTile(false),
-    window: wallTile(true),
-    door: doorTile(),
+    floor: [floorTile(1), floorTile(2), floorTile(3)],
+    rug: rugTile(),
+    wall: wallTile(),
+    doorway: [doorwayTile(4), doorwayTile(5)],
+    bookshelf: [bookshelfTile(21), bookshelfTile(22)],
+    portrait: portraitTile(),
+    table: tableTile(),
+    candle: candleTile(),
+    window: windowTile(),
+    stairs: stairsTile(),
+    chest: chestTile(),
+    frontDoor: frontDoorTile(),
+    cobweb: [cobwebTile(0), cobwebTile(1), cobwebTile(2)],
   };
 }
