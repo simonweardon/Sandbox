@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pixel Route 1</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="shell">
+    <canvas id="screen" width="240" height="160"></canvas>
+
+    <div id="pad">
+      <div class="dpad">
+        <button class="key up"    data-key="up"    aria-label="Up">▲</button>
+        <button class="key left"  data-key="left"  aria-label="Left">◀</button>
+        <button class="key right" data-key="right" aria-label="Right">▶</button>
+        <button class="key down"  data-key="down"  aria-label="Down">▼</button>
+      </div>
+      <div class="buttons">
+        <button class="key b" data-key="run"    aria-label="Run">B</button>
+        <button class="key a" data-key="action" aria-label="Action">A</button>
+      </div>
+    </div>
+
+    <p id="help">
+      <strong>Arrows / WASD</strong> walk &nbsp;·&nbsp;
+      <strong>Shift</strong> run &nbsp;·&nbsp;
+      <strong>Z / Space / Enter</strong> talk &amp; confirm
+    </p>
+  </div>
+
+  <script src="js/pixel.js"></script>
+  <script src="js/tiles.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
