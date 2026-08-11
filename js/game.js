@@ -1,6 +1,5 @@
 /*
- * game.js — the engine: input, movement, scenes, puzzles, the boss and the
- * renderer.
+ * game.js — the engine: input, movement, scenes, puzzles and the renderer.
  *
  * Everything is drawn to a 240x160 canvas (the GBA resolution) and then scaled
  * up by a whole number, which is what keeps the pixels square and sharp.
@@ -8,7 +7,7 @@
  * The game runs in one of three modes:
  *   play      — you have control
  *   cutscene  — a script has control (see CUTSCENES in scenes.js)
- *   boss      — Act 3's flashlight duel
+ *   battle    — a turn-based encounter (see js/battle.js)
  */
 
 const VIEW_W = 240;
@@ -47,7 +46,6 @@ const lightCtx = lightBuffer.getContext('2d');
 
 const tiles = buildTiles();
 const props = buildProps();
-const pieceSprites = buildPieces();
 const rabbitSheet = buildCharacter(RABBIT_PALETTE);
 const sleeperSprite = buildSleeper();
 const wolfSheet = buildWolf();
@@ -86,11 +84,12 @@ const G = {
   },
 
   lit: new Set(),        // candelabra relit for DUSTY, keyed "x,y"
+  readPortraits: new Set(),
   crates: [],            // cellar, rebuilt on entry
   chimeStep: 0,          // attic progress through the rhyme
-  pieces: 0,
 
   dialogue: null,        // { pages, page }
+  choice: null,          // { prompt, options, index, onPick }
   card: null,            // { lines, timer } act title card
   banner: 0,
   chill: 0,
@@ -104,17 +103,14 @@ const G = {
   seenAtticHint: false,
 };
 
-const boss = {
-  active: false, hits: 0, nerve: 3,
-  phase: 'lurk', timer: 1.2,
-  wx: 0, wy: 0, facing: 'down', pose: 0,
-  flash: 0, cooldown: 0, roar: 0,
-};
-
 /* --- Input ---------------------------------------------------------------- */
 
 const keys = { up: false, down: false, left: false, right: false, run: false };
 let actionPressed = false;   // consumed once, so holding A doesn't spam
+
+/* Edge-triggered presses, cleared at the end of every update. Menus need to
+   know about the press itself; the soul in a dodge box needs the held state. */
+const justPressed = { up: false, down: false, left: false, right: false, action: false };
 
 const KEY_MAP = {
   ArrowUp: 'up', KeyW: 'up',
@@ -130,12 +126,14 @@ addEventListener('keydown', (e) => {
   if (e.repeat) return;
   if (ACTION_KEYS.has(e.code)) {
     actionPressed = true;
+    justPressed.action = true;
     e.preventDefault();
     return;
   }
   const key = KEY_MAP[e.code];
   if (key) {
     keys[key] = true;
+    if (key !== 'run') justPressed[key] = true;
     e.preventDefault();
   }
 });
@@ -154,8 +152,8 @@ for (const button of document.querySelectorAll('#pad .key')) {
   const press = (e) => {
     e.preventDefault();
     button.classList.add('held');
-    if (name === 'action') actionPressed = true;
-    else keys[name] = true;
+    if (name === 'action') { actionPressed = true; justPressed.action = true; }
+    else { keys[name] = true; if (name !== 'run') justPressed[name] = true; }
   };
   const release = (e) => {
     e.preventDefault();
@@ -198,11 +196,6 @@ function chimeAt(x, y) {
   return CHIMES.find((c) => c.x === x && c.y === y) || null;
 }
 
-function pieceAt(x, y) {
-  if (G.map !== 'manor') return null;
-  return PIECES.find((p) => !p.taken && p.x === x && p.y === y) || null;
-}
-
 /* Everything that blocks a square besides the tile itself. */
 function occupied(x, y) {
   if (ghostsHere().some((g) => g.x === x && g.y === y)) return true;
@@ -222,6 +215,21 @@ function openDialogue(lines) {
 function advanceDialogue() {
   G.dialogue.page++;
   if (G.dialogue.page >= G.dialogue.pages.length) G.dialogue = null;
+}
+
+/* A little pick-one menu, drawn in the dialogue box. */
+function openChoice(prompt, options, onPick) {
+  G.choice = { prompt, options, index: 0, onPick };
+}
+
+function updateChoice() {
+  const choice = G.choice;
+  if (justPressed.up) choice.index = (choice.index + choice.options.length - 1) % choice.options.length;
+  if (justPressed.down) choice.index = (choice.index + 1) % choice.options.length;
+  if (justPressed.action) {
+    G.choice = null;
+    choice.onPick(choice.options[choice.index], choice.index);
+  }
 }
 
 function showCard(lines, seconds = 2.8) {
@@ -304,7 +312,7 @@ function enterMap(name, x, y, facing) {
     openDialogue(RHYME);
   }
   if (name === 'attic') G.chimeStep = 0;
-  if (name === 'lair') startBoss();
+  if (name === 'lair') playCutscene(CUTSCENES.lairEntry);
 }
 
 function usePortal(char) {
@@ -386,14 +394,21 @@ function lightCandle(x, y) {
 function talkToGhost(ghost) {
   if (ghost.name === 'MOPSY') {
     if (!G.flags.metMopsy) { G.flags.metMopsy = true; openDialogue(ghost.greet); return; }
-    if (G.pieces >= PIECE_TOTAL && !G.flags.cellarOpen) {
-      G.flags.cellarOpen = true;
-      openDialogue(ghost.done);
+    if (G.flags.cellarOpen) {
+      openDialogue(['Down the hatch with you.', 'And do not touch my coal.']);
       return;
     }
-    openDialogue(G.flags.cellarOpen
-      ? ['Down the hatch with you.', 'And do not touch my coal.']
-      : ghost.nag);
+    if (!G.readPortraits.size) { openDialogue(ghost.nag); return; }
+    openChoice('Which one tells the truth?',
+      PORTRAIT_NAMES.concat(['— not yet —']), (pick) => {
+        if (pick === '— not yet —') return;
+        if (pick === TRUTHFUL_PORTRAIT) {
+          G.flags.cellarOpen = true;
+          openDialogue(ghost.done);
+          return;
+        }
+        openDialogue(ghost.wrong);
+      });
     return;
   }
 
@@ -406,18 +421,6 @@ function talkToGhost(ghost) {
   openDialogue(G.flags.atticOpen
     ? ['Up you go. Mind the third step,', 'it is not there.']
     : ghost.nag);
-}
-
-/* Pieces are picked up by walking onto them — no button required. */
-function collectAt(x, y) {
-  const piece = pieceAt(x, y);
-  if (!piece) return;
-  piece.taken = true;
-  G.pieces++;
-  const lines = [`You found ${piece.label}!`, piece.line];
-  if (piece.extra) lines.push(piece.extra);
-  if (G.pieces === PIECE_TOTAL) lines.push('That is all five.', 'MOPSY will want to see.');
-  openDialogue(lines);
 }
 
 /* --- Interaction ------------------------------------------------------------ */
@@ -441,6 +444,12 @@ function tryInteract() {
   if (chime) { ringChime(chime); return; }
 
   const char = tileAt(front.x, front.y);
+  const portrait = PORTRAITS[`${front.x},${front.y}`];
+  if (portrait) {
+    G.readPortraits.add(portrait.name);
+    openDialogue(portrait.lines);
+    return;
+  }
   if (char === 'u') { lightCandle(front.x, front.y); return; }
   if (usePortal(char)) return;
 
@@ -505,7 +514,6 @@ function onPlayerArrived() {
   if (char !== '0') G.portalGuard = false;
   if (char === '0' && !G.portalGuard) { usePortal('0'); return; }
 
-  collectAt(player.x, player.y);
   if (G.map === 'cellar') checkCellar();
 
   if (!G.dialogue && char === 'w' && Math.random() < SPOOK_CHANCE) {
@@ -526,138 +534,11 @@ function updateChase(dt) {
   if (player.x >= 20 && !cutscene.active) playCutscene(CUTSCENES.scared);
 }
 
-/* --- Act 3: the flashlight duel ------------------------------------------------ */
+/* --- Act 3 ------------------------------------------------------------------ */
 
-const BEAM_LENGTH = 86;
-const BEAM_HALF_ANGLE = Math.PI / 5;
-const FLASH_TIME = 0.34;
-const FLASH_COOLDOWN = 0.75;
-
-function startBoss() {
-  G.mode = 'boss';
-  boss.active = true;
-  boss.hits = 0;
-  boss.nerve = 3;
-  boss.flash = 0;
-  boss.cooldown = 0;
-  boss.roar = 0;
-  placeWolf(1.4);
-  showCard(['ACT THREE', 'POINT THE LIGHT AT HIM'], 3);
-}
-
-/* Drops the wolf somewhere along the edge of the room, away from her. */
-function placeWolf(lurkTime) {
-  const map = currentMap();
-  const spots = [];
-  for (let y = 2; y < map.h - 2; y++) {
-    for (let x = 2; x < map.w - 2; x++) {
-      const onEdge = x === 2 || y === 2 || x === map.w - 3 || y === map.h - 3;
-      if (!onEdge) continue;
-      if (Math.abs(x - player.x) + Math.abs(y - player.y) < 5) continue;
-      spots.push([x, y]);
-    }
-  }
-  const [x, y] = spots[Math.floor(Math.random() * spots.length)];
-  boss.wx = x * TILE + TILE / 2;
-  boss.wy = y * TILE + TILE / 2;
-  boss.phase = 'lurk';
-  boss.timer = lurkTime;
-}
-
-function playerCentre() {
-  const p = actorPixel(player);
-  return { x: p.x + TILE / 2, y: p.y + TILE / 2 };
-}
-
-/* Is the wolf inside the beam right now? */
-function wolfInBeam() {
-  const me = playerCentre();
-  const dx = boss.wx - me.x;
-  const dy = boss.wy - me.y;
-  const dist = Math.hypot(dx, dy) || 0.001;
-  if (dist > BEAM_LENGTH) return false;
-  const dir = DIRS[player.facing];
-  const dot = (dx * dir.dx + dy * dir.dy) / dist;
-  return dot > Math.cos(BEAM_HALF_ANGLE);
-}
-
-function updateBoss(dt) {
-  boss.cooldown = Math.max(0, boss.cooldown - dt);
-  boss.flash = Math.max(0, boss.flash - dt);
-  boss.roar = Math.max(0, boss.roar - dt);
-
-  // She can still walk about while the duel is on.
-  updatePlayer(dt);
-
-  if (actionPressed) {
-    actionPressed = false;
-    if (boss.cooldown <= 0) {
-      boss.flash = FLASH_TIME;
-      boss.cooldown = FLASH_COOLDOWN;
-      if (boss.phase !== 'hurt' && wolfInBeam()) hitWolf();
-    }
-  }
-
-  boss.timer -= dt;
-
-  if (boss.phase === 'lurk') {
-    boss.facing = boss.wx > playerCentre().x ? 'left' : 'right';
-    if (boss.timer <= 0) { boss.phase = 'charge'; boss.timer = 4; }
-    return;
-  }
-
-  if (boss.phase === 'charge') {
-    const me = playerCentre();
-    const dx = me.x - boss.wx;
-    const dy = me.y - boss.wy;
-    const dist = Math.hypot(dx, dy) || 0.001;
-    const speed = 34 + boss.hits * 12;
-    boss.wx += (dx / dist) * speed * dt;
-    boss.wy += (dy / dist) * speed * dt;
-    boss.facing = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : 'down';
-    boss.pose = Math.floor(G.clock * 8) % 2;
-    if (dist < 11) scare();
-    return;
-  }
-
-  if (boss.phase === 'hurt' && boss.timer <= 0) {
-    placeWolf(Math.max(0.6, 1.4 - boss.hits * 0.3));
-  }
-}
-
-function hitWolf() {
-  boss.hits++;
-  boss.phase = 'hurt';
-  boss.timer = 0.9;
-  G.chill = 0.5;
-
-  if (boss.hits >= 3) {
-    boss.active = false;
-    playCutscene(CUTSCENES.victory);
-    return;
-  }
-  openDialogue(boss.hits === 1
-    ? ['The light lands on him and he', 'SHRIEKS — a sound like a door.']
-    : ['Twice now. He is thinner than he', 'was. One more.']);
-}
-
-function scare() {
-  boss.nerve--;
-  boss.roar = 0.7;
-  G.shake = 0.6;
-  if (boss.nerve <= 0) {
-    boss.nerve = 3;
-    boss.hits = 0;
-    openDialogue([
-      'He rushes you and your nerve goes.',
-      'You back into the stairwell, shaking.',
-      'But BUTTON is still down there.',
-      'Ears up. Again.',
-    ]);
-  } else {
-    openDialogue(['He knocks you sprawling!', `Nerve left: ${boss.nerve}.`]);
-  }
-  placeWolf(1.2);
+/* The duel is a turn-based encounter now; see js/battle.js. */
+function startFinalBattle() {
+  startBattle('final', () => playCutscene(CUTSCENES.victory));
 }
 
 /* --- Cutscene runner --------------------------------------------------------- */
@@ -732,14 +613,16 @@ function update(dt) {
     if (G.card.timer <= 0) G.card = null;
   }
 
+  if (G.choice) { updateChoice(); clearPresses(); return; }
+
   if (G.dialogue && G.mode !== 'cutscene') {
     if (actionPressed) advanceDialogue();
-    actionPressed = false;
+    clearPresses();
     return;   // the house holds still while someone is talking
   }
 
-  if (G.mode === 'cutscene') { updateCutscene(dt); actionPressed = false; return; }
-  if (G.mode === 'boss') { updateBoss(dt); actionPressed = false; return; }
+  if (G.mode === 'battle') { updateBattle(dt); clearPresses(); return; }
+  if (G.mode === 'cutscene') { updateCutscene(dt); clearPresses(); return; }
 
   if (actionPressed) {
     if (!player.moving) tryInteract();
@@ -748,6 +631,12 @@ function update(dt) {
 
   updatePlayer(dt);
   if (G.map === 'chase') updateChase(dt);
+  clearPresses();
+}
+
+function clearPresses() {
+  actionPressed = false;
+  for (const key of Object.keys(justPressed)) justPressed[key] = false;
 }
 
 /* --- Rendering ----------------------------------------------------------------- */
@@ -759,6 +648,12 @@ function actorPixel(actor) {
     x: (actor.fromX + (actor.x - actor.fromX) * t) * TILE,
     y: (actor.fromY + (actor.y - actor.fromY) * t) * TILE,
   };
+}
+
+/* Her centre in world pixels — what the light follows. */
+function playerCentre() {
+  const p = actorPixel(player);
+  return { x: p.x + TILE / 2, y: p.y + TILE / 2 };
 }
 
 function clamp(value, min, max) {
@@ -842,8 +737,7 @@ function drawDarkness(camX, camY, startX, startY, endX, endY) {
   };
 
   const me = playerCentre();
-  // In the lair she only has what the lantern gives her.
-  hole(me.x - camX, me.y - camY, G.mode === 'boss' ? 26 : 54);
+  hole(me.x - camX, me.y - camY, 54);
 
   for (let y = startY; y <= endY; y++) {
     for (let x = startX; x <= endX; x++) {
@@ -857,30 +751,12 @@ function drawDarkness(camX, camY, startX, startY, endX, endY) {
     }
   }
 
-  // The flashlight beam: a cone cut straight out of the dark.
-  if (boss.flash > 0) {
-    const dir = DIRS[player.facing];
-    const angle = Math.atan2(dir.dy, dir.dx);
-    const cx = me.x - camX;
-    const cy = me.y - camY;
-    const fade = Math.min(1, boss.flash / (FLASH_TIME * 0.6));
-    const gradient = lightCtx.createRadialGradient(cx, cy, 0, cx, cy, BEAM_LENGTH);
-    gradient.addColorStop(0, `rgba(0,0,0,${fade})`);
-    gradient.addColorStop(0.7, `rgba(0,0,0,${fade * 0.85})`);
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
-    lightCtx.fillStyle = gradient;
-    lightCtx.beginPath();
-    lightCtx.moveTo(cx, cy);
-    lightCtx.arc(cx, cy, BEAM_LENGTH, angle - BEAM_HALF_ANGLE, angle + BEAM_HALF_ANGLE);
-    lightCtx.closePath();
-    lightCtx.fill();
-  }
-
   lightCtx.globalCompositeOperation = 'source-over';
   ctx.drawImage(lightBuffer, 0, 0);
 }
 
 function render() {
+  if (G.mode === 'battle') { renderBattle(); return; }
   const map = currentMap();
   const focus = actorPixel(player);
   let camX = clamp(Math.round(focus.x + TILE / 2 - VIEW_W / 2), 0, Math.max(0, map.w * TILE - VIEW_W));
@@ -911,12 +787,6 @@ function render() {
   }
 
   // Loose objects on the floor.
-  if (G.map === 'manor') {
-    for (const piece of PIECES) {
-      if (piece.taken) continue;
-      drawGlinting(pieceSprites[piece.kind], piece.x, piece.y, camX, camY);
-    }
-  }
   if (G.map === 'nursery' && G.dollOnFloor) {
     drawGlinting(props.doll, 8, 5, camX, camY);
   }
@@ -977,8 +847,6 @@ function render() {
   actors.sort((a, b) => a.y - b.y);
   for (const actor of actors) actor.draw();
 
-  if (G.mode === 'boss' && boss.active) drawBossWolf(camX, camY);
-
   // Cobweb foreground: redraw the lower threads over anyone standing in them.
   for (let y = startY; y <= endY; y++) {
     for (let x = startX; x <= endX; x++) {
@@ -994,14 +862,11 @@ function render() {
     ctx.fillStyle = `rgba(150,190,230,${pulse * 0.5})`;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
-  if (boss.roar > 0) {
-    ctx.fillStyle = `rgba(140,20,40,${boss.roar * 0.5})`;
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  }
 
   drawHud();
   if (G.banner > 0) drawBanner();
   if (G.dialogue) drawDialogue();
+  if (G.choice) drawChoice();
 
   // The fade sits under the act cards, so a card can be read over black.
   if (G.fade > 0.01) {
@@ -1020,24 +885,6 @@ function drawGlinting(sprite, tx, ty, camX, camY) {
   ctx.fillRect(sx + 12, sy + 3, 1, 1);
   ctx.fillRect(sx + 11, sy + 4, 3, 1);
   ctx.fillRect(sx + 12, sy + 5, 1, 1);
-}
-
-/* In the lair the wolf is drawn from his own pixel position, and while he
-   lurks only his eyes show. */
-function drawBossWolf(camX, camY) {
-  const sx = Math.round(boss.wx - TILE / 2 - camX);
-  const sy = Math.round(boss.wy - TILE / 2 - camY);
-  if (boss.phase === 'lurk') {
-    const glow = 0.55 + Math.sin(G.clock * 4) * 0.25;
-    ctx.fillStyle = `rgba(255,207,90,${glow})`;
-    ctx.fillRect(sx + 4, sy + 7, 2, 2);
-    ctx.fillRect(sx + 10, sy + 7, 2, 2);
-    return;
-  }
-  const sheet = wolfSheet[boss.facing] || wolfSheet.down;
-  ctx.globalAlpha = boss.phase === 'hurt' ? 0.45 + Math.sin(G.clock * 30) * 0.2 : 1;
-  ctx.drawImage(sheet[boss.pose], sx, sy - 4);
-  ctx.globalAlpha = 1;
 }
 
 function panel(x, y, w, h) {
@@ -1066,25 +913,22 @@ function drawDialogue() {
   }
 }
 
-/* Top-right status: what she's carrying, or how the duel is going. */
+function drawChoice() {
+  const box = { x: 6, y: 94, w: VIEW_W - 12, h: 60 };
+  panel(box.x, box.y, box.w, box.h);
+  ctx.fillStyle = '#e8e2ee';
+  ctx.font = '8px ui-monospace, monospace';
+  ctx.textBaseline = 'top';
+  ctx.fillText(G.choice.prompt, box.x + 9, box.y + 8);
+  G.choice.options.forEach((option, i) => {
+    const y = box.y + 20 + i * 8;
+    ctx.fillStyle = i === G.choice.index ? '#ffcf5a' : '#cfc7da';
+    ctx.fillText(`${i === G.choice.index ? '>' : ' '} ${option}`, box.x + 12, y);
+  });
+}
+
+/* Top-right status: how DUSTY's candles are going. */
 function drawHud() {
-  if (G.mode === 'boss') {
-    panel(VIEW_W - 74, 6, 68, 32);
-    ctx.fillStyle = '#e8e2ee';
-    ctx.font = '8px ui-monospace, monospace';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`LIGHT ${boss.hits}/3`, VIEW_W - 68, 12);
-    ctx.fillText(`NERVE ${'*'.repeat(boss.nerve)}`, VIEW_W - 68, 24);
-    return;
-  }
-  if (G.map === 'manor' && !G.flags.cellarOpen && G.flags.metMopsy) {
-    panel(VIEW_W - 68, 6, 62, 20);
-    ctx.fillStyle = '#e8e2ee';
-    ctx.font = '8px ui-monospace, monospace';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`PIECES ${G.pieces}/${PIECE_TOTAL}`, VIEW_W - 65, 12);
-    return;
-  }
   if (G.map === 'manor' && G.flags.metDusty && !G.flags.atticOpen) {
     panel(VIEW_W - 74, 6, 68, 20);
     ctx.fillStyle = '#e8e2ee';

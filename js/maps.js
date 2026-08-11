@@ -209,21 +209,32 @@ const TILE_TALK = {
 
 /* --- Things that live in rooms ------------------------------------------- */
 
-/* The five pieces the wolf shook loose while he ran. MOPSY's task. */
-const PIECES = [
-  { x: 12, y: 9, kind: 'head', label: "BUTTON's head",
-    line: 'Her painted eyes are still cheerful.' },
-  { x: 30, y: 9, kind: 'arm', label: "BUTTON's arm",
-    line: 'It was under the dinner table.' },
-  { x: 7, y: 22, kind: 'leg', label: "BUTTON's leg",
-    line: 'Wound about with old cobweb.' },
-  { x: 35, y: 25, kind: 'body', label: "BUTTON's body",
-    line: 'Her blue dress, hardly torn at all.' },
-  { x: 17, y: 4, kind: 'ribbon', label: "BUTTON's ribbon",
-    line: 'Caught on the bannister, in a bow', extra: 'that you did not tie.' },
-];
+/*
+ * MOPSY's riddle. Four portraits in the hallway; exactly one of them is
+ * telling the truth, and that one saw where the wolf went.
+ *
+ * It works out to the DUCHESS. If the ADMIRAL were truthful the DUCHESS
+ * would be lying, which would make the BOY truthful as well — two truths, so
+ * no. If the BOY were truthful, the ADMIRAL would be lying, which makes the
+ * DUCHESS truthful — two again. The DOG's claim is self-defeating: were he
+ * truthful he would be the only one, but then the ADMIRAL's lie would make
+ * the DUCHESS truthful too. Only the DUCHESS holds up on her own.
+ */
+const PORTRAITS = {
+  '15,5': { name: 'THE ADMIRAL',
+    lines: ['A sea-green admiral, all whiskers.', '"The DUCHESS is lying," he says.'] },
+  '24,5': { name: 'THE DUCHESS',
+    lines: ['A duchess with a very long neck.', '"The BOY is lying," she says.'] },
+  '15,11': { name: 'THE BOY',
+    lines: ['A boy holding a dead pheasant.', '"The ADMIRAL and the DUCHESS are',
+      'both lying," he says.'] },
+  '24,11': { name: 'THE DOG',
+    lines: ['A painted dog on a cushion.', '"I am the only one in this hall',
+      'telling the truth," he says.'] },
+};
 
-const PIECE_TOTAL = PIECES.length;
+const PORTRAIT_NAMES = ['THE ADMIRAL', 'THE DUCHESS', 'THE BOY', 'THE DOG'];
+const TRUTHFUL_PORTRAIT = 'THE DUCHESS';
 
 /* The candles the wolf snuffed on his way through. DUSTY's task. */
 const SNUFFED = [
@@ -261,18 +272,26 @@ const GHOSTS = {
       'I am MOPSY. I have been dead for',
       'two hundred years and I am still',
       'not finished tidying.',
-      'That shadow-thing tore your doll',
-      'as he ran. Five pieces, all over',
-      'my nice clean house. NOT tidy.',
-      'Bring them to me and I will get you',
-      'into the cellar. He went that way.',
+      'Your shadow went down to the cellar,',
+      'and the hatch is nailed shut.',
+      'Now. The four portraits in my hall',
+      'all saw him go. Exactly one of them',
+      'is telling the truth about it —',
+      'the other three are dreadful liars.',
+      'Read all four, work out which one is',
+      'honest, and come and tell me.',
     ],
-    nag: ['Five pieces, dear. Still missing some.', 'I do not make the rules. I made these rules.'],
+    nag: ['Read the four portraits, dear.',
+      'Exactly one tells the truth.'],
     done: [
-      'All five! Look at that. Spotless.',
+      'THE DUCHESS. Of course it is.',
+      'She is the only one in this house',
+      'who has never once lied to me.',
       'The cellar hatch is yours. Mind the',
       'crates — I never could shift them.',
     ],
+    wrong: ['No, no. That one lies like a rug,',
+      'and I would know, I have beaten', 'most of the rugs.'],
   },
   dusty: {
     name: 'DUSTY', x: 12, y: 13, facing: 'down', map: 'manor', palette: 'B',

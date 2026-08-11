@@ -26,10 +26,12 @@ he turns around, and that is as far as your nerve goes.
 dead servants who are pleased to see anybody at all. Each has a job for you,
 and each job opens a room:
 
-- **MOPSY** wants the five pieces of BUTTON the wolf shook loose as he ran.
-  Bring them and she opens the **coal cellar** — a crate-pushing puzzle. Shove
-  all three crates onto the floor sigils and you get the lantern. (Wedge one
-  in a corner and simply step outside; the room resets.)
+- **MOPSY** has four portraits in her hallway. All four claim to have seen
+  where the wolf went, exactly one of them is telling the truth, and she wants
+  to know which. Read all four, work it out, and tell her — she opens the
+  **coal cellar**, a crate-pushing puzzle. Shove all three crates onto the
+  floor sigils and you get the lantern. (Wedge one in a corner and simply step
+  outside; the room resets.)
 - **DUSTY** wants the four candles the wolf snuffed relit. Do it and he unties
   the **attic** stair, where four chimes must be rung in the order of the
   rhyme. Wrong note and it starts again. Get it right for the moon-glass lens.
@@ -37,11 +39,18 @@ and each job opens a room:
 Lantern plus lens makes a working flashlight, and the dark stair at the head
 of the hall stops being a dead end.
 
-**Act Three — the dark below.** He circles you in the black, and all you can
-see are his eyes. Face him and press Z to flash the lantern down the cone of
-its beam. Catch him in it three times. He gets faster each time you do, and if
-he reaches you first you lose your nerve — three of those and you start the
-fight over.
+**Act Three — the dark below.** A turn-based fight, in the manner of Undertale.
+Pick SHINE, ACT, ITEM or PLEAD; SHINE opens a sweeping bar you stop with A, and
+stopping it inside the bright band catches him in the beam. Three of those and
+he is too small to be frightening — then PLEAD lights up, and the way the story
+ends is that you ask nicely.
+
+Between your turns he takes his own, and you survive it by steering your soul
+around the box at the bottom of the screen, dodging what he throws. Every graze
+costs a nerve; run out and you simply lose a light and start the round again.
+
+There is an earlier encounter too, at the end of the chase in Act One. Nothing
+on the menu works there. That is the point of it.
 
 ## How it's put together
 
@@ -55,15 +64,21 @@ instead of blurry.
 | `js/tiles.js` | The 16x16 tiles and props, drawn procedurally |
 | `js/maps.js` | All six rooms, plus the ghosts, tasks, puzzles and portals |
 | `js/scenes.js` | The scripted cutscenes for Acts 1 and 3 |
-| `js/game.js` | Input, movement, lighting, the puzzles, the boss and the loop |
+| `js/battle.js` | The turn-based encounters: menus, the aim bar, the dodge box |
+| `js/game.js` | Input, movement, lighting, the puzzles and the loop |
 | `server.js` | A dependency-free static server, for deploying it |
 
 ### Modes
 
 The loop runs in one of three modes. **play** gives you control; **cutscene**
-hands it to a script; **boss** is Act 3, which is `play` plus the duel. Only
-one of them reads the keyboard at a time, which is what stops you wandering off
-mid-conversation.
+hands it to a script; **battle** replaces the screen entirely with an
+encounter. Only one of them reads the keyboard at a time, which is what stops
+you wandering off mid-conversation.
+
+Menus need to know about the press itself while the dodging soul needs the
+held state, so input is tracked both ways: `keys` for what is held down, and
+`justPressed` for what was pressed this frame, cleared at the end of every
+update.
 
 ### Cutscenes
 
@@ -85,9 +100,7 @@ The lighting is one extra canvas. Each frame it's filled with near-black, then
 soft radial holes are punched out of it with `destination-out` — one for the
 rabbit, one for every candle and window on screen — and the result is laid over
 the finished scene. Candles get a sine wobble so they gutter; moonlight
-doesn't. The flashlight is the same trick with a cone instead of a circle, and
-the hit test is a dot product against the same cone, so what you see is exactly
-what you hit.
+doesn't.
 
 ### Editing the art
 

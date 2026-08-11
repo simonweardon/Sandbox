@@ -65,19 +65,19 @@ const CUTSCENES = {
     { say: ['There! At the end of the landing.', 'GO.'] },
   ],
 
-  /* The chase ends the only way it can, the first time. */
+  /* The chase ends the only way it can, the first time: in a fight you
+     cannot win, whatever you pick from the menu. */
   scared: () => [
     { do: () => { wolf.path = []; wolf.facing = 'left'; } },
     { wait: 0.4 },
     { say: ['He stops. He turns around.'] },
-    { shake: 1.2 },
-    { do: () => { boss.roar = 1.2; } },
-    { say: ['The shadow stands up on its back legs',
-      'and it is very, very tall.',
-      'Your nerve goes all at once.'] },
-    { fade: 1 },
+    { do: () => startBattle('first', () => playCutscene(CUTSCENES.afterFirst)) },
+  ],
+
+  afterFirst: () => [
     { do: () => {
       wolf.visible = false;
+      G.fade = 1;
       enterMap('manor', 19, 27, 'up');
       G.act = 2;
     } },
@@ -86,19 +86,25 @@ const CUTSCENES = {
     { say: ['You come to at the foot of the',
       'stairs, in a house that is not yours.',
       'Somewhere below, something is',
-      'chewing on your doll.'] },
-    { say: ['Find help. Find her pieces.', 'Find a light.'] },
+      'holding on to your doll.'] },
+    { say: ['Find help. Find a way down.', 'Find a light.'] },
+  ],
+
+  lairEntry: () => [
+    { say: ['The stair goes down a long way.',
+      'At the bottom of it, something', 'is waiting for you.'] },
+    { do: () => startFinalBattle() },
   ],
 
   /* --- Act 3 -------------------------------------------------------------- */
   victory: () => [
-    { do: () => { G.shake = 0.8; boss.active = false; } },
-    { say: ['The third light pins him against', 'the wall.'] },
-    { say: ['He comes apart like smoke off a',
-      'snuffed wick, and what is left is',
-      'a small blue dress on the floor.'] },
-    { do: () => { G.mode = 'cutscene'; } },
-    { say: ['BUTTON. All of her, all at once,', 'and not a stitch out of place.'] },
+    { do: () => { G.shake = 0.5; } },
+    { say: ['He puts BUTTON down in front of you',
+      'very carefully, and will not look up.'] },
+    { say: ['"She was warm," he says.',
+      '"Nothing in this house has been', 'warm for a long time."'] },
+    { say: ['You tell him he can visit.',
+      'You are not certain you mean it yet.'] },
     { fade: 1 },
     { do: () => {
       enterMap('nursery', 6, 8, 'down');
