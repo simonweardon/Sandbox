@@ -191,6 +191,89 @@ function candleTile() {
   });
 }
 
+/* The same candelabra, snuffed out. Lighting it swaps in the lit tile. */
+function unlitCandleTile() {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.plank);
+    px(0, 5, C.plankDark, TILE, 1);
+    px(6, 9, C.woodDark, 4, 6);
+    px(5, 14, C.woodDark, 6, 2);
+    px(7, 5, '#b9ae95', 2, 5);      // wax, gone grey
+    px(4, 7, '#b9ae95', 2, 3);
+    px(10, 7, '#b9ae95', 2, 3);
+    px(7, 4, '#6a5f4d', 2, 1);      // cold wicks
+    px(4, 6, '#6a5f4d', 2, 1);
+    px(10, 6, '#6a5f4d', 2, 1);
+  });
+}
+
+/* A sigil cut into the cellar floor: push a crate onto it. */
+function sigilTile(seed) {
+  const base = floorTile(seed);
+  return drawTile((ctx, px) => {
+    ctx.drawImage(base, 0, 0);
+    const ring = [[5, 2, 6], [3, 3, 2], [11, 3, 2], [2, 5, 2], [12, 5, 2],
+      [2, 9, 2], [12, 9, 2], [3, 11, 2], [11, 11, 2], [5, 12, 6]];
+    for (const [x, y, w] of ring) px(x, y, '#8fa7d8', w, 1);
+    px(7, 6, '#8fa7d8', 2, 1);
+    px(6, 7, '#8fa7d8', 4, 2);
+    px(7, 9, '#8fa7d8', 2, 1);
+  });
+}
+
+function bedTile() {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.plank);
+    px(1, 0, C.woodDark, 14, TILE);
+    px(2, 1, '#e8e2ee', 12, 5);     // pillow end
+    px(2, 6, '#6f7fb8', 12, 9);     // blanket
+    px(2, 9, '#8494cc', 12, 1);
+    px(2, 12, '#8494cc', 12, 1);
+  });
+}
+
+/* The three ways down, up, and further down. */
+function hatchTile(open) {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.plank);
+    px(1, 2, C.woodDark, 14, 12);
+    px(2, 3, open ? '#0d0a16' : C.wood, 12, 10);
+    if (!open) {
+      px(2, 7, C.woodDark, 12, 1);
+      px(11, 5, C.gold, 2, 3);      // the ring you'd pull
+    }
+    px(1, 2, C.gold, 14, 1);
+    px(1, 13, C.gold, 14, 1);
+  });
+}
+
+function upStairTile(roped) {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.woodDark);
+    for (let i = 0; i < 4; i++) {
+      px(0, i * 4, C.wood, TILE, 3);
+      px(0, i * 4 + 3, C.outline, TILE, 1);
+    }
+    px(0, 0, 'rgba(190,200,230,0.28)', TILE, 6);   // light from above
+    if (roped) {
+      px(0, 8, '#a5713f', TILE, 2);
+      px(3, 7, '#c98f52', 2, 4);
+      px(11, 7, '#c98f52', 2, 4);
+    }
+  });
+}
+
+function downStairTile() {
+  return drawTile((ctx, px) => {
+    fill(ctx, C.outline);
+    for (let i = 0; i < 3; i++) {
+      px(i + 1, 12 - i * 4, C.wood, TILE - (i + 1) * 2, 3);
+      px(i + 1, 15 - i * 4, '#120d1c', TILE - (i + 1) * 2, 1);
+    }
+    px(0, 0, '#0a0710', TILE, 5);   // it does not get lighter down there
+  });
+}
+
 function windowTile() {
   return drawTile((ctx, px) => {
     fill(ctx, C.wall);
@@ -322,6 +405,59 @@ function buildPieces() {
   };
 }
 
+/* --- Props: things that sit on tiles rather than being one ---------------- */
+
+const CHIME_COLOURS = {
+  blue: ['#4a7fd8', '#8fb4f0'],
+  red: ['#c0455f', '#e88b9b'],
+  green: ['#4a9c62', '#8fd8a2'],
+  gold: ['#c9a44a', '#f0d68f'],
+};
+
+function buildProps() {
+  const props = {
+    crate: drawTile((ctx, px) => {
+      px(1, 2, C.outline, 14, 13);
+      px(2, 3, C.wood, 12, 11);
+      px(2, 3, C.woodLight, 12, 1);
+      px(2, 13, C.woodDark, 12, 1);
+      // Cross-braces
+      for (let i = 0; i < 10; i++) {
+        px(3 + i, 4 + i, C.woodDark);
+        px(12 - i, 4 + i, C.woodDark);
+      }
+      px(2, 8, C.woodDark, 12, 1);
+    }),
+    /* BUTTON, whole — how she looks before the wolf gets to her. */
+    doll: drawTile((ctx, px) => {
+      px(5, 1, C.outline, 6, 6);
+      px(6, 2, '#f0dcc6', 4, 4);
+      px(6, 1, '#c96f4a', 4, 1);
+      px(6, 4, C.outline, 1, 1);
+      px(9, 4, C.outline, 1, 1);
+      px(4, 6, C.outline, 8, 8);
+      px(5, 7, '#7aa0c4', 6, 6);
+      px(5, 9, '#a8c8e4', 6, 1);
+      px(3, 7, C.outline, 2, 5);   // arms
+      px(11, 7, C.outline, 2, 5);
+      px(6, 6, '#c4566a', 4, 1);   // ribbon
+    }),
+    chime: {},
+  };
+
+  for (const [name, [body, shine]] of Object.entries(CHIME_COLOURS)) {
+    props.chime[name] = drawTile((ctx, px) => {
+      px(7, 0, C.woodDark, 2, 4);   // cord
+      px(4, 4, C.outline, 8, 9);
+      px(5, 5, body, 6, 7);
+      px(6, 6, shine, 2, 4);        // highlight down one side
+      px(5, 12, C.outline, 6, 1);
+      px(7, 13, body, 2, 2);        // clapper
+    });
+  }
+  return props;
+}
+
 /* Everything the renderer needs, baked and ready to blit. */
 function buildTiles() {
   return {
@@ -333,10 +469,18 @@ function buildTiles() {
     portrait: portraitTile(),
     table: tableTile(),
     candle: candleTile(),
+    unlitCandle: unlitCandleTile(),
     window: windowTile(),
     stairs: stairsTile(),
     chest: chestTile(),
     frontDoor: frontDoorTile(),
     cobweb: [cobwebTile(0), cobwebTile(1), cobwebTile(2)],
+    sigil: sigilTile(31),
+    bed: bedTile(),
+    hatchShut: hatchTile(false),
+    hatchOpen: hatchTile(true),
+    upStairRoped: upStairTile(true),
+    upStair: upStairTile(false),
+    downStair: downStairTile(),
   };
 }

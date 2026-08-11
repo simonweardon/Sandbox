@@ -21,10 +21,18 @@ const RABBIT_PALETTE = {
   S: '#403354', // shoes
 };
 
-const GHOST_PALETTE = {
-  K: '#5f6f8a', // faint outline
-  G: '#cfe0ef', // body
-  P: '#9fb4cc', // mouth
+/* Two ghosts, same art, different tempers. */
+const GHOST_PALETTES = {
+  A: { K: '#5f6f8a', G: '#cfe0ef', P: '#9fb4cc' },   // MOPSY, cold blue
+  B: { K: '#6c8a70', G: '#d2ecd4', P: '#9cc0a2' },   // DUSTY, mildewed green
+};
+
+/* The thing that took her doll: mostly outline, with two lamps for eyes. */
+const WOLF_PALETTE = {
+  K: '#0b0812', // outline, darker than the dark
+  S: '#1d1630', // body
+  s: '#2e2447', // highlight
+  E: '#ffcf5a', // eyes
 };
 
 /* --- The rabbit -----------------------------------------------------------
@@ -93,6 +101,71 @@ const LEGS_SIDE = [
   ['...KDDDDK.......', '....KDDKDK......', '....KSSKSK......'],
   ['...KDDDDK.......', '...KDDKDK.......', '...KSSKSK.......'],
   ['...KDDDDK.......', '.....KDDKDK.....', '.....KSSKSK.....'],
+];
+
+/* Asleep, before any of this started. */
+const RABBIT_ASLEEP = [
+  '................',
+  '................',
+  '................',
+  '..KK............',
+  '..KWK.KKKK......',
+  '..KWKKWWWWKK....',
+  '..KWWWWWWWWWK...',
+  '..KWWKKWWKKWWK..',
+  '..KWWWWWWWWWWK..',
+  '..KWWWWWWWWWWK..',
+  '...KDDDDDDDDK...',
+  '....KDDDDDDK....',
+  '.....KKKKKK.....',
+  '................',
+  '................',
+  '................',
+];
+
+/* --- The wolf -------------------------------------------------------------
+   Same body-plus-legs trick as the rabbit: 13 rows of body, 3 of legs. */
+
+const WOLF_SIDE = [
+  '................',
+  '..KK............',
+  '.KSSK..KK.......',
+  '.KSSSKKSSK......',
+  'KSEESSSSSSK.....',
+  'KSSSSSSSSSSK....',
+  'KKSSSSSSSSSSK...',
+  '.KSSSSSSSSSSSK..',
+  '.KSSSSSSSSSSSSK.',
+  '..KSSSSSSSSSSSK.',
+  '..KSSSSSSSSSSSKK',
+  '..KSSSSSSSSSSSK.',
+  '..KSSKSSSKSSSSK.',
+];
+
+const WOLF_FRONT = [
+  '................',
+  '..KK......KK....',
+  '.KSSK....KSSK...',
+  '.KSSSK..KSSSK...',
+  '.KSSSSKKSSSSK...',
+  '.KSSSSSSSSSSK...',
+  '.KSEESSSSEESK...',
+  '.KSSSSSSSSSSK...',
+  '.KSSSKKKKSSSK...',
+  '.KSSSSSSSSSSK...',
+  '..KSSSSSSSSK....',
+  '..KSSSSSSSSK....',
+  '..KSSSSSSSSK....',
+];
+
+const WOLF_LEGS_SIDE = [
+  ['..KSK.KSK.KSK...', '..KSK.KSK.KSK...', '..KKK.KKK.KKK...'],
+  ['.KSK..KSK..KSK..', '.KSK..KSK..KSK..', '.KKK..KKK..KKK..'],
+];
+
+const WOLF_LEGS_FRONT = [
+  ['..KSSSSSSSSK....', '..KSK.KK.KSK....', '..KKK.KK.KKK....'],
+  ['..KSSSSSSSSK....', '.KSK..KK..KSK...', '.KKK..KK..KKK...'],
 ];
 
 /* --- Ghosts ---------------------------------------------------------------
@@ -184,6 +257,21 @@ function buildCharacter(palette) {
   return sheet;
 }
 
-function buildGhost() {
-  return GHOST_HEMS.map((hem) => bake(GHOST_BODY.concat(hem), GHOST_PALETTE));
+function buildGhost(which) {
+  return GHOST_HEMS.map((hem) => bake(GHOST_BODY.concat(hem), GHOST_PALETTES[which]));
+}
+
+/* The wolf gets two poses per facing — enough for a prowl. */
+function buildWolf() {
+  const sheet = {
+    left: WOLF_LEGS_SIDE.map((legs) => bake(WOLF_SIDE.concat(legs), WOLF_PALETTE)),
+    down: WOLF_LEGS_FRONT.map((legs) => bake(WOLF_FRONT.concat(legs), WOLF_PALETTE)),
+  };
+  sheet.right = sheet.left.map(flipped);
+  sheet.up = sheet.down;
+  return sheet;
+}
+
+function buildSleeper() {
+  return bake(RABBIT_ASLEEP, RABBIT_PALETTE);
 }

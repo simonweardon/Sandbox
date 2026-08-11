@@ -1,9 +1,8 @@
 # Ashgrove Manor
 
-A small top-down pixel game in the style of the Game Boy Pokémon titles. You
-are a little white rabbit in a red pinafore, alone in a dark house that has
-taken your doll apart and hidden the pieces in its rooms. Find all five, then
-put BUTTON back together in the nursery chest.
+A small top-down pixel game in the style of the Game Boy Pokémon titles, in
+three acts. You are a little white rabbit in a red pinafore. Something came
+into your room while you were asleep and took your doll.
 
 No build step, no dependencies — open `index.html` in a browser.
 
@@ -13,24 +12,36 @@ No build step, no dependencies — open `index.html` in a browser.
 | --- | --- |
 | Walk | Arrow keys or WASD |
 | Run | Hold Shift |
-| Look / talk / confirm | Z, Space or Enter |
+| Look, talk, confirm, and flash the lantern | Z, Space or Enter |
 
 On a touch device an on-screen D-pad and A/B buttons appear instead.
 
-## What's in it
+## The three acts
 
-- **Grid movement.** You step tile to tile rather than sliding freely. Tapping a
-  new direction pivots you on the spot first, exactly like the originals.
-- **Sprite animation.** Four facings with a two-frame walk cycle, alternating
-  each step.
-- **Candlelight.** The manor is dark. A pool of light travels with you, candles
-  gutter where they stand, and the moon comes through the windows. Finish the
-  doll and the house eases up.
-- **Five doll pieces**, one to a room — head, arm, leg, body and ribbon. Walk
-  over one to pick it up; the counter is always on screen.
-- **Ghosts** who turn to look at you and tell you roughly where to search, plus
-  furniture worth pressing Z at.
-- **Cobwebs** you wade through, with the occasional cold shiver.
+**Act One — a shadow gets in.** You are asleep. The wolf takes BUTTON out of
+your room without opening the door. You chase him down the long landing, and
+he turns around, and that is as far as your nerve goes.
+
+**Act Two — Ashgrove Manor.** You wake in a house that is not yours, with two
+dead servants who are pleased to see anybody at all. Each has a job for you,
+and each job opens a room:
+
+- **MOPSY** wants the five pieces of BUTTON the wolf shook loose as he ran.
+  Bring them and she opens the **coal cellar** — a crate-pushing puzzle. Shove
+  all three crates onto the floor sigils and you get the lantern. (Wedge one
+  in a corner and simply step outside; the room resets.)
+- **DUSTY** wants the four candles the wolf snuffed relit. Do it and he unties
+  the **attic** stair, where four chimes must be rung in the order of the
+  rhyme. Wrong note and it starts again. Get it right for the moon-glass lens.
+
+Lantern plus lens makes a working flashlight, and the dark stair at the head
+of the hall stops being a dead end.
+
+**Act Three — the dark below.** He circles you in the black, and all you can
+see are his eyes. Face him and press Z to flash the lantern down the cone of
+its beam. Catch him in it three times. He gets faster each time you do, and if
+he reaches you first you lose your nerve — three of those and you start the
+fight over.
 
 ## How it's put together
 
@@ -40,19 +51,43 @@ instead of blurry.
 
 | File | Contents |
 | --- | --- |
-| `js/pixel.js` | The rabbit and the ghosts, and the code that bakes them into sprites |
-| `js/tiles.js` | The 16x16 mansion tiles and doll pieces, drawn procedurally |
-| `js/world.js` | The floor plan, collision rules, ghosts and where the pieces lie |
-| `js/game.js` | Input, movement, camera, the darkness pass and the game loop |
+| `js/pixel.js` | The rabbit, the ghosts and the wolf, baked into sprite sheets |
+| `js/tiles.js` | The 16x16 tiles and props, drawn procedurally |
+| `js/maps.js` | All six rooms, plus the ghosts, tasks, puzzles and portals |
+| `js/scenes.js` | The scripted cutscenes for Acts 1 and 3 |
+| `js/game.js` | Input, movement, lighting, the puzzles, the boss and the loop |
 | `server.js` | A dependency-free static server, for deploying it |
+
+### Modes
+
+The loop runs in one of three modes. **play** gives you control; **cutscene**
+hands it to a script; **boss** is Act 3, which is `play` plus the duel. Only
+one of them reads the keyboard at a time, which is what stops you wandering off
+mid-conversation.
+
+### Cutscenes
+
+A cutscene is a list of steps, each of which knows when it is finished:
+
+```js
+{ say: [...] }                    // waits for the player to read it
+{ walk: wolf, path: [[8, 7]] }    // waits until he gets there
+{ card: ['ACT ONE'], seconds: 3 } // waits out the title card
+{ do: () => { ... } }             // changes the world, then continues
+```
+
+`updateCutscene()` advances the index when the current step reports done, so
+scripts read top to bottom with no timers to keep in sync by hand.
 
 ### The darkness
 
 The lighting is one extra canvas. Each frame it's filled with near-black, then
-soft radial holes are punched out of it with `destination-out` — one that
-follows the rabbit, one for every candle and window on screen — and the result
-is laid over the finished scene. Candles get a small sine wobble on their
-radius so they flicker; moonlight doesn't.
+soft radial holes are punched out of it with `destination-out` — one for the
+rabbit, one for every candle and window on screen — and the result is laid over
+the finished scene. Candles get a sine wobble so they gutter; moonlight
+doesn't. The flashlight is the same trick with a cone instead of a circle, and
+the hit test is a dot product against the same cone, so what you see is exactly
+what you hit.
 
 ### Editing the art
 
@@ -62,28 +97,29 @@ Characters are written as rows of palette keys, so you can redraw them in place:
 '..KWKDDDDDKWK...'   // '.' is transparent; every other letter is a palette entry
 ```
 
-A body is 13 rows, and the bottom three rows come from a leg set — one body
-serves the whole walk cycle. `buildCharacter()` bakes a full sheet (four
-facings x three poses) from a palette. Row lengths are validated at load, so a
-mistyped row throws an error instead of quietly drawing a corrupted sprite.
+A body is 13 rows, and the bottom three come from a leg set — one body serves
+the whole walk cycle. Row lengths are validated at load, so a mistyped row
+throws instead of quietly drawing a corrupted sprite. The two ghosts and the
+wolf are the same machinery with different palettes.
 
-### Editing the mansion
+### Editing the rooms
 
-`MAP` in `js/world.js` is an array of strings, one character per tile:
+Every map in `js/maps.js` is an array of strings, one character per tile:
 
 ```
 .  floorboards   r  carpet      d  doorway    w  cobwebs
 #  wall          B  bookshelf   P  portrait   T  table
-c  candelabra    W  window      s  staircase  C  toy chest
-D  front door
+c  candelabra    u  snuffed candelabra        W  window
+s  staircase     C  toy chest   D  front door b  bed
+O  floor sigil   1  cellar hatch  2  attic stair  3  the dark stair
+0  way back
 ```
 
 Add a character to `SOLID` to make it block movement, to `LIGHTS` to make it
-glow, and to `tileImage()` in `js/game.js` to give it a look. Ghosts and the
-chest live in `ENTITIES`; the doll pieces and their pickup lines live in
-`PIECES`; the one-liners for furniture live in `TILE_TALK`.
+glow, and to `tileImage()` in `js/game.js` to give it a look. `PORTALS` says
+where the numbered tiles lead and which flag unlocks them; `GHOSTS` holds each
+ghost's lines for every state of their task.
 
 Two tiles are drawn edge-aware rather than as self-contained squares: carpet
 gets its gold border only where it meets bare floor, and cobwebs are anchored
-in one corner so neighbouring tiles knit together. Both are handled at render
-time in `js/game.js`.
+in one corner so neighbouring tiles knit together.
