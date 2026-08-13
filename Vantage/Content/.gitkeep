@@ -1,0 +1,3 @@
+This project ships no content assets on purpose. Everything - geometry,
+materials, input mappings and HUD - is created in C++ at runtime. The folder
+exists because Unreal expects a Content directory to be present.

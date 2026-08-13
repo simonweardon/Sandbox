@@ -1,0 +1,26 @@
+# Unreal Engine generated directories
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Generated project files
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+.vs/
+.vscode/
+.idea/
+Makefile
+CMakeLists.txt
+*.workspace
+
+# Compiled binaries
+*.dll
+*.exe
+*.lib
+*.pdb
+*.so
+*.dylib
