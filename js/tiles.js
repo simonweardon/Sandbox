@@ -55,11 +55,12 @@ const C = {
   wood: '#a5713f',
   woodDark: '#7a5230',
   board: '#e8d5a8',
-  roof: '#c8543f',
-  roofDark: '#a03f2f',
-  wall: '#efe0c4',
-  wallDark: '#cdb894',
-  door: '#7a5230',
+  roof: '#8f8f9c',
+  roofDark: '#6a6a78',
+  wall: '#cfcfd8',
+  wallDark: '#a5a5b2',
+  door: '#5c5c68',
+  doorDark: '#43434e',
   outline: '#241b2f',
 };
 
@@ -211,7 +212,12 @@ function roofTile() {
 function wallTile(withWindow) {
   return drawTile((ctx, px) => {
     fill(ctx, C.wall);
-    px(0, 0, C.wallDark, TILE, 1);
+    // Stone courses with staggered vertical joints, so a run of walls reads as
+    // blockwork rather than a flat grey slab.
+    for (let y = 0; y < TILE; y += 5) {
+      px(0, y, C.wallDark, TILE, 1);
+      px(y % 10 ? 4 : 10, y + 1, C.wallDark, 1, 4);
+    }
     px(0, TILE - 1, C.wallDark, TILE, 1);
     if (!withWindow) return;
     px(4, 4, C.outline, 8, 7);
@@ -226,8 +232,8 @@ function doorTile() {
     fill(ctx, C.wall);
     px(3, 1, C.outline, 10, 15);
     px(4, 2, C.door, 8, 14);
-    px(5, 3, C.woodDark, 6, 1);
-    px(5, 8, C.woodDark, 6, 1);
+    px(5, 3, C.doorDark, 6, 1);
+    px(5, 8, C.doorDark, 6, 1);
     px(10, 9, '#f5c542', 1, 2);  // handle
   });
 }

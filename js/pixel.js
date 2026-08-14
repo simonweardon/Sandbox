@@ -18,9 +18,10 @@ const HERO_PALETTE = {
   C: '#e0403c', // cap
   H: '#3a2a1e', // hair
   S: '#f2c79b', // skin
-  B: '#3b7dd8', // shirt
-  P: '#3c4166', // trousers
-  O: '#f2f2f2', // shoes
+  B: '#f4f4f2', // shirt
+  b: '#d3d5de', // shirt shadow
+  P: '#3b6fd8', // trousers
+  O: '#2f3446', // shoes
 };
 
 /* The rival/NPC is the same art with different colours — exactly how the
@@ -30,9 +31,10 @@ const NPC_PALETTE = {
   C: '#7d55c7',
   H: '#20304a',
   S: '#d8a173',
-  B: '#4fae6a',
-  P: '#3a3f4f',
-  O: '#ffd257',
+  B: '#f4f4f2',
+  b: '#d3d5de',
+  P: '#2f57b0',
+  O: '#43331f',
 };
 
 /* --- Character art -------------------------------------------------------
@@ -52,7 +54,7 @@ const BODY_DOWN = [
   '...KSSSSSSSK....',
   '...KKBBBBBKK....',
   '..KSKBBBBBKSK...',
-  '..KSKBBBBBKSK...',
+  '..KSKbbbbbKSK...',
 ];
 
 const BODY_UP = [
@@ -68,7 +70,7 @@ const BODY_UP = [
   '...KHHHHHHHK....',
   '...KKBBBBBKK....',
   '..KSKBBBBBKSK...',
-  '..KSKBBBBBKSK...',
+  '..KSKbbbbbKSK...',
 ];
 
 /* Drawn facing left; the right-facing sheet is this one mirrored. */
@@ -85,7 +87,7 @@ const BODY_SIDE = [
   '...KSSSSSK......',
   '...KBBBBK.......',
   '..KBBBBBK.......',
-  '..KSBBBBK.......',
+  '..KSbbbbK.......',
 ];
 
 /* Leg sets: [standing, legs together, legs apart]. Alternating the last two
