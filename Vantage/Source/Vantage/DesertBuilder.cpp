@@ -2,6 +2,7 @@
 
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -99,6 +100,23 @@ UStaticMeshComponent* ADesertBuilder::AddPillar(const FVector& Centre, float Rad
 {
 	const FVector Scale(Radius / MeshHalfSize, Radius / MeshHalfSize, HalfHeight / MeshHalfSize);
 	return AddShape(CylinderMesh, Centre, Scale, FRotator::ZeroRotator, Colour, bCollides);
+}
+
+void ADesertBuilder::AddLight(const FVector& Location, const FLinearColor& Colour, float Intensity, float Radius)
+{
+	UPointLightComponent* Light = NewObject<UPointLightComponent>(this);
+	Light->SetupAttachment(RootComponent);
+	Light->SetMobility(EComponentMobility::Movable);
+	Light->RegisterComponent();
+
+	Light->SetWorldLocation(Location);
+	Light->SetIntensityUnits(ELightUnits::Unitless);
+	Light->SetIntensity(Intensity);
+	Light->SetAttenuationRadius(Radius);
+	Light->SetLightColor(Colour);
+	Light->SetCastShadows(true);
+
+	BuiltComponents.Add(Light);
 }
 
 // ---------------------------------------------------------------------------

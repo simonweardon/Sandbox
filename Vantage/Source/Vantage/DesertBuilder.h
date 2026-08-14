@@ -52,6 +52,9 @@ private:
 	UStaticMeshComponent* AddSphere(const FVector& Centre, float Radius, const FLinearColor& Colour, bool bCollides = true);
 	UStaticMeshComponent* AddPillar(const FVector& Centre, float Radius, float HalfHeight, const FLinearColor& Colour, bool bCollides = true);
 
+	/** A local point light. Used inside the vault and on the extraction mast. */
+	void AddLight(const FVector& Location, const FLinearColor& Colour, float Intensity, float Radius);
+
 	/** Sun, sky, fog and ambient. Without these the desert renders black. */
 	void BuildSky();
 
