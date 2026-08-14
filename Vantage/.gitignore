@@ -24,3 +24,5 @@ CMakeLists.txt
 *.pdb
 *.so
 *.dylib
+Tools/build-log.txt
+Tools/build-errors.txt
