@@ -3,11 +3,20 @@
 #include "VantageGameMode.h"
 
 #include "Components/PointLightComponent.h"
+#include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	/** Half height and radius of each of the two cones forming the crystal. */
+	constexpr float ShardHalfHeight = 17.f;
+	constexpr float ShardRadius = 10.f;
+	constexpr float MeshHalfSize = 50.f;
+}
 
 AShardPickup::AShardPickup()
 {
@@ -16,23 +25,42 @@ AShardPickup::AShardPickup()
 	Pivot = CreateDefaultSubobject<USceneComponent>(TEXT("Pivot"));
 	RootComponent = Pivot;
 
-	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	Mesh->SetupAttachment(Pivot);
-	Mesh->SetRelativeScale3D(FVector(0.22f, 0.22f, 0.45f));
-	Mesh->SetRelativeRotation(FRotator(0.f, 0.f, 45.f));
+	// A dedicated sphere carries the interaction trace rather than the meshes,
+	// so the shard stays easy to put the crosshair on however thin it looks.
+	Probe = CreateDefaultSubobject<USphereComponent>(TEXT("Probe"));
+	Probe->SetupAttachment(Pivot);
+	Probe->InitSphereRadius(46.f);
+	Probe->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Probe->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Probe->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
-	// Query only, and only on the visibility channel: the interaction trace must
-	// find it, but the player should never bump into it.
-	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
-	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-	Mesh->SetCastShadow(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeFinder(TEXT("/Engine/BasicShapes/Cone.Cone"));
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeFinder.Succeeded())
+	const FVector ConeScale(
+		ShardRadius / MeshHalfSize,
+		ShardRadius / MeshHalfSize,
+		ShardHalfHeight / MeshHalfSize);
+
+	// Two cones base to base make a bipyramid, which reads as a crystal from any
+	// angle. A single cube never does, however you rotate it.
+	auto MakeCone = [&](const TCHAR* Name, float Z, const FRotator& Rotation) -> UStaticMeshComponent*
 	{
-		Mesh->SetStaticMesh(CubeFinder.Object);
-	}
+		UStaticMeshComponent* Cone = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Cone->SetupAttachment(Pivot);
+		Cone->SetRelativeLocation(FVector(0.f, 0.f, Z));
+		Cone->SetRelativeRotation(Rotation);
+		Cone->SetRelativeScale3D(ConeScale);
+		Cone->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Cone->SetCastShadow(false);
+		if (ConeFinder.Succeeded())
+		{
+			Cone->SetStaticMesh(ConeFinder.Object);
+		}
+		return Cone;
+	};
+
+	UpperCone = MakeCone(TEXT("UpperCone"), ShardHalfHeight, FRotator::ZeroRotator);
+	LowerCone = MakeCone(TEXT("LowerCone"), -ShardHalfHeight, FRotator(0.f, 0.f, 180.f));
 
 	Glow = CreateDefaultSubobject<UPointLightComponent>(TEXT("Glow"));
 	Glow->SetupAttachment(Pivot);
@@ -46,10 +74,14 @@ void AShardPickup::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (UMaterialInstanceDynamic* Material = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	for (UStaticMeshComponent* Cone : { UpperCone.Get(), LowerCone.Get() })
 	{
-		Material->SetVectorParameterValue(TEXT("Color"), Tint);
+		if (UMaterialInstanceDynamic* Material = Cone->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			Material->SetVectorParameterValue(TEXT("Color"), Tint);
+		}
 	}
+
 	Glow->SetLightColor(Tint);
 
 	// Stagger the bob so a room full of shards does not pulse in lockstep.
@@ -62,7 +94,11 @@ void AShardPickup::Tick(float DeltaSeconds)
 
 	Phase += DeltaSeconds;
 	Pivot->AddLocalRotation(FRotator(0.f, 55.f * DeltaSeconds, 0.f));
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, FMath::Sin(Phase * 1.8f) * 7.f));
+
+	const float Bob = FMath::Sin(Phase * 1.8f) * 7.f;
+	UpperCone->SetRelativeLocation(FVector(0.f, 0.f, ShardHalfHeight + Bob));
+	LowerCone->SetRelativeLocation(FVector(0.f, 0.f, -ShardHalfHeight + Bob));
+	Glow->SetIntensity(3000.f * (1.f + FMath::Sin(Phase * 2.4f) * 0.18f));
 }
 
 FText AShardPickup::GetInteractionPrompt() const
