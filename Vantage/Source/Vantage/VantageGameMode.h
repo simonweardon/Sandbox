@@ -7,6 +7,17 @@
 
 class APlayerStart;
 
+/** Where the run is up to. */
+UENUM()
+enum class EVantageObjective : uint8
+{
+	/** Fight north and get into the vault ruin. */
+	FetchCache,
+	/** Carry it back to the lit pad you started on. */
+	ReturnToExtraction,
+	Complete
+};
+
 /**
  * Owns the run - waves, kills, death and restart - and assembles the map.
  *
@@ -51,6 +62,18 @@ public:
 	/** Called by the player character when its health reaches zero. */
 	void NotifyPlayerDown();
 
+	/** Called by AObjectiveCache when the player walks into it. */
+	void NotifyCacheTaken();
+
+	EVantageObjective GetObjective() const { return Objective; }
+	bool IsCarryingCache() const { return Objective == EVantageObjective::ReturnToExtraction; }
+
+	/** One line telling the player what to do next. */
+	FText GetObjectiveText() const;
+
+	/** World point the HUD marker should sit on, for the current objective. */
+	FVector GetObjectiveLocation() const;
+
 private:
 	void EnsureLevelBuilt();
 
@@ -60,6 +83,12 @@ private:
 
 	/** Spawns one zombie on a ring around the arena, clear of the player. */
 	void SpawnZombie(int32 Seed);
+
+	/** Spawns the group standing between the player and the vault. */
+	void SpawnVaultGuards(int32 Count, int32 Seed);
+
+	/** Polls whether the carried cache has reached the extraction pad. */
+	void CheckExtraction();
 
 	void RestartRun();
 
@@ -75,9 +104,15 @@ private:
 
 	FVector SpawnLocation = FVector(0.f, 0.f, 140.f);
 
+	/** How close to the pad counts as extracted. */
+	UPROPERTY(EditDefaultsOnly, Category = "Vantage")
+	float ExtractionRadius = 320.f;
+
 	FTimerHandle IntermissionTimer;
 	FTimerHandle RestartTimer;
+	FTimerHandle ExtractionTimer;
 
+	EVantageObjective Objective = EVantageObjective::FetchCache;
 	bool bLevelBuilt = false;
 	bool bBetweenWaves = false;
 	bool bPlayerDown = false;

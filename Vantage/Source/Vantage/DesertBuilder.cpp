@@ -318,6 +318,13 @@ void ADesertBuilder::BuildCity()
 			FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
 			0.f);
 
+		// Keep clear of the vault ruin, which is placed by hand at (0, 4600).
+		// A tower landing on top of it would seal the doorway.
+		if (FVector::DistSquared2D(Base, FVector(0.f, 4600.f, 0.f)) < FMath::Square(1500.f))
+		{
+			continue;
+		}
+
 		const float Width = Stream.FRandRange(300.f, 620.f);
 		const float Depth = Stream.FRandRange(300.f, 620.f);
 		const float Height = Stream.FRandRange(1400.f, 4200.f);
@@ -442,6 +449,94 @@ void ADesertBuilder::BuildCover()
 	}
 }
 
+// ---------------------------------------------------------------------------
+// the objective
+// ---------------------------------------------------------------------------
+
+// Placed due north and well past the ring the horde spawns on, so the walk to
+// it goes straight through them rather than around.
+const FVector ADesertBuilder::CacheLocation(0.f, 4780.f, 0.f);
+const FVector ADesertBuilder::VaultDoorLocation(0.f, 4180.f, 0.f);
+const FVector ADesertBuilder::ExtractionLocation(0.f, 0.f, 0.f);
+
+void ADesertBuilder::BuildVaultRuin()
+{
+	const float BaseY = 4600.f;
+
+	// Ground floor: a hollow room 900 x 700 with a doorway on the south face.
+	const float RoomHeight = 340.f;
+	const float WallHalf = 25.f;
+
+	// South wall, split around the doorway at X -125..125.
+	AddBox(FVector(-300.f, 4250.f, RoomHeight * 0.5f), FVector(175.f, WallHalf, RoomHeight * 0.5f), ConcreteColour);
+	AddBox(FVector(300.f, 4250.f, RoomHeight * 0.5f),  FVector(175.f, WallHalf, RoomHeight * 0.5f), ConcreteColour);
+	AddBox(FVector(0.f, 4250.f, 320.f), FVector(125.f, WallHalf, 20.f), ConcreteColour);
+
+	AddBox(FVector(0.f, 4950.f, RoomHeight * 0.5f),   FVector(475.f, WallHalf, RoomHeight * 0.5f), ConcreteColour);
+	AddBox(FVector(-475.f, BaseY, RoomHeight * 0.5f), FVector(WallHalf, 375.f, RoomHeight * 0.5f), ConcreteColour);
+	AddBox(FVector(475.f, BaseY, RoomHeight * 0.5f),  FVector(WallHalf, 375.f, RoomHeight * 0.5f), ConcreteColour);
+
+	AddBox(FVector(0.f, BaseY, 5.f), FVector(475.f, 375.f, 5.f), ConcreteDark, false);
+	AddBox(FVector(0.f, BaseY, 360.f), FVector(500.f, 400.f, 20.f), ConcreteDark);
+
+	// Doorway surround, lit, so the entrance reads from across the sand.
+	AddBox(FVector(-137.f, 4250.f, 150.f), FVector(12.f, 30.f, 150.f), SteelColour, false);
+	AddBox(FVector(137.f, 4250.f, 150.f),  FVector(12.f, 30.f, 150.f), SteelColour, false);
+	AddBox(FVector(0.f, 4250.f, 296.f),    FVector(137.f, 30.f, 10.f), SteelColour, false);
+
+	AddLight(FVector(0.f, 4180.f, 250.f), FLinearColor(0.35f, 0.85f, 1.f), 5000.f, 900.f);
+
+	// Interior lighting: dim, so the cache's own glow is what draws you in.
+	AddLight(FVector(-200.f, 4500.f, 300.f), FLinearColor(1.f, 0.86f, 0.68f), 2600.f, 800.f);
+	AddLight(FVector(220.f, 4800.f, 300.f),  FLinearColor(1.f, 0.86f, 0.68f), 2200.f, 800.f);
+
+	// The tower above the room, so it reads as a skyscraper rather than a shed.
+	const float ShaftBase = 380.f;
+	const float ShaftTop = 2080.f;
+	AddBox(FVector(0.f, BaseY, (ShaftBase + ShaftTop) * 0.5f), FVector(430.f, 340.f, (ShaftTop - ShaftBase) * 0.5f), ConcreteColour);
+
+	const float GlazeZ = (ShaftBase + ShaftTop) * 0.5f;
+	const float GlazeHeight = (ShaftTop - ShaftBase) * 0.42f;
+	AddBox(FVector(433.f, BaseY, GlazeZ),  FVector(3.f, 280.f, GlazeHeight), GlassColour, false);
+	AddBox(FVector(-433.f, BaseY, GlazeZ), FVector(3.f, 280.f, GlazeHeight), GlassColour, false);
+	AddBox(FVector(0.f, BaseY + 343.f, GlazeZ), FVector(350.f, 3.f, GlazeHeight), GlassColour, false);
+	AddBox(FVector(0.f, BaseY - 343.f, GlazeZ), FVector(350.f, 3.f, GlazeHeight), GlassColour, false);
+
+	for (int32 Index = 1; Index <= 4; ++Index)
+	{
+		const float Z = ShaftBase + (ShaftTop - ShaftBase) * Index / 5.f;
+		AddBox(FVector(0.f, BaseY, Z), FVector(450.f, 358.f, 12.f), ConcreteDark, false);
+	}
+
+	// Broken crown.
+	AddBox(FVector(-70.f, BaseY + 50.f, ShaftTop + 110.f), FVector(320.f, 250.f, 110.f), ConcreteColour);
+	AddBox(FVector(60.f, BaseY - 40.f, ShaftTop + 300.f),  FVector(190.f, 150.f, 90.f),  ConcreteColour);
+	AddBox(FVector(-30.f, BaseY + 20.f, ShaftTop + 430.f), FVector(90.f, 80.f, 50.f),    ConcreteColour);
+}
+
+void ADesertBuilder::BuildExtractionPad()
+{
+	const FLinearColor Beacon(1.f, 0.66f, 0.16f);
+
+	// A ring of low markers rather than a solid disc, so it does not read as a
+	// platform you are meant to stand on top of.
+	for (int32 Index = 0; Index < 12; ++Index)
+	{
+		const float Angle = (360.f / 12.f) * Index;
+		const FVector At(
+			FMath::Cos(FMath::DegreesToRadians(Angle)) * 300.f,
+			FMath::Sin(FMath::DegreesToRadians(Angle)) * 300.f,
+			10.f);
+
+		AddRotatedBox(At, FVector(34.f, 12.f, 10.f), FRotator(0.f, Angle + 90.f, 0.f), Beacon, false);
+	}
+
+	// Mast, visible over the cover from anywhere in the arena.
+	AddPillar(FVector(0.f, 0.f, 300.f), 16.f, 300.f, SteelColour);
+	AddPillar(FVector(0.f, 0.f, 610.f), 34.f, 16.f, Beacon, false);
+	AddLight(FVector(0.f, 0.f, 640.f), Beacon, 16000.f, 2600.f);
+}
+
 void ADesertBuilder::Build()
 {
 	if (!CubeMesh)
@@ -462,4 +557,6 @@ void ADesertBuilder::Build()
 	BuildCity();
 	AddDistantSkyline();
 	BuildCover();
+	BuildVaultRuin();
+	BuildExtractionPad();
 }

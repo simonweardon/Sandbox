@@ -28,6 +28,13 @@ private:
 	void DrawHealth(const AVantageCharacter* Player);
 	void DrawAmmo(const ARevolver* Revolver);
 	void DrawRunState(const AVantageGameMode* GameMode);
+
+	/**
+	 * Diamond on the objective, or an arrow pinned to the screen edge pointing
+	 * at it. Without this the vault is 46 metres of identical sand away and
+	 * there is nothing to steer by.
+	 */
+	void DrawObjectiveMarker(const AVantageGameMode* GameMode, const AVantageCharacter* Player);
 	void DrawDamageVignette(float Strength);
 	void DrawDownBanner();
 

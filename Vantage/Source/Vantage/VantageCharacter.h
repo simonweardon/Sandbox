@@ -10,14 +10,19 @@ class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
 class USpotLightComponent;
+class USpringArmComponent;
+class UStaticMeshComponent;
 struct FInputActionValue;
 
 /**
- * The player. First person, no visible body, no animation assets.
+ * The player: a bearded gunslinger seen over his own shoulder.
  *
- * All of its Enhanced Input assets are built in C++ at PostInitializeComponents
- * rather than loaded from .uasset files, which is what lets this project run
- * without any content. See BuildInputBindings().
+ * He is built from engine primitives the same way everything else here is -
+ * there is no skeletal mesh and no animation asset in this project, so the walk
+ * cycle, the aim and the beard are all geometry driven from code.
+ *
+ * His Enhanced Input assets are likewise built with NewObject at
+ * PostInitializeComponents rather than loaded. See BuildInputBindings().
  */
 UCLASS()
 class VANTAGE_API AVantageCharacter : public ACharacter
@@ -51,10 +56,24 @@ public:
 	void Revive(const FVector& At);
 
 protected:
-	UPROPERTY(VisibleAnywhere, Category = "Vantage")
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Camera")
+	TObjectPtr<USpringArmComponent> SpringArm;
+
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Camera")
 	TObjectPtr<UCameraComponent> Camera;
 
-	UPROPERTY(VisibleAnywhere, Category = "Vantage")
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body")
+	TObjectPtr<USceneComponent> BodyRoot;
+
+	/** Pitches with the aim, so the gun arm tracks where the camera looks. */
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body")
+	TObjectPtr<USceneComponent> AimPivot;
+
+	/** Where the revolver is attached. */
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body")
+	TObjectPtr<USceneComponent> GunHand;
+
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body")
 	TObjectPtr<USpotLightComponent> Flashlight;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage|Movement")
@@ -79,7 +98,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage|Combat")
 	float ShotRange = 14000.f;
 
-	/** Health per second regained after a spell without being hit. */
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage|Combat")
 	float RegenPerSecond = 4.f;
 
@@ -92,6 +110,7 @@ protected:
 
 private:
 	void BuildInputBindings();
+	UStaticMeshComponent* AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation, const FLinearColor& Colour);
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
@@ -106,10 +125,26 @@ private:
 	/** Traces from the view point and applies damage to whatever it finds. */
 	void ResolveShot();
 
+	/** Walk cycle, aim pitch and the slump when down. */
+	void UpdateBody(float DeltaSeconds);
+
 	void CheckForFall();
 	void ReportSilentInput();
 
 	UPROPERTY(Transient) TObjectPtr<ARevolver> Revolver;
+
+	// Body parts. Tinted in BeginPlay, animated in UpdateBody.
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Torso;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Coat;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Head;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Hair;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Beard;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> BeardTaper;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Moustache;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> GunArm;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> FreeArm;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> LeftLeg;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> RightLeg;
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> MoveAction;
@@ -129,6 +164,8 @@ private:
 	float TimeSinceDamage = 0.f;
 	float DamageFlash = 0.f;
 	float HitMarker = 0.f;
+	float GaitPhase = 0.f;
+	float GaitBlend = 0.f;
 	bool bLastHitHeadshot = false;
 	bool bDown = false;
 	bool bReceivedAnyInput = false;

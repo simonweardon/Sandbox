@@ -29,6 +29,15 @@ public:
 	/** Half width of the area zombies are allowed to spawn in. */
 	static constexpr float ArenaRadius = 3200.f;
 
+	/** The cache sits at the back of the vault ruin, well beyond the horde. */
+	static const FVector CacheLocation;
+
+	/** Ground floor of the vault ruin, for the HUD to point at. */
+	static const FVector VaultDoorLocation;
+
+	/** Where the run started, and where the cache has to be carried back to. */
+	static const FVector ExtractionLocation;
+
 private:
 	UStaticMeshComponent* AddShape(
 		UStaticMesh* Mesh,
@@ -62,6 +71,12 @@ private:
 
 	/** Waist-high cover, wrecks and rubble near the middle. */
 	void BuildCover();
+
+	/** The one ruin you can walk into, with the cache in the back of it. */
+	void BuildVaultRuin();
+
+	/** Lit pad at the origin, so the way back is findable from a distance. */
+	void BuildExtractionPad();
 
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> CubeMesh;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> CylinderMesh;

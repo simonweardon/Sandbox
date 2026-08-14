@@ -61,6 +61,9 @@ private:
 	float Health = 100.f;
 	float Phase = 0.f;
 	float AttackCooldown = 0.f;
+
+	/** 1 right after a swing, decaying to 0. Drives the lunge forward. */
+	float AttackLunge = 0.f;
 	float DeadFor = 0.f;
 	bool bDead = false;
 

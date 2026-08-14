@@ -8,17 +8,33 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SpotLightComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/SpringArmComponent.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	constexpr float MeshHalfSize = 50.f;
+
+	const FLinearColor SkinColour    (0.600f, 0.410f, 0.290f);
+	const FLinearColor CoatColour    (0.270f, 0.185f, 0.120f);
+	const FLinearColor ShirtColour   (0.415f, 0.355f, 0.270f);
+	const FLinearColor TrouserColour (0.190f, 0.170f, 0.160f);
+	const FLinearColor HairColour    (0.155f, 0.100f, 0.065f);
+}
 
 AVantageCharacter::AVantageCharacter()
 {
@@ -26,6 +42,9 @@ AVantageCharacter::AVantageCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(38.f, 92.f);
 
+	// Third person, but he still faces wherever the camera looks: the gun has to
+	// point where the crosshair is, and turning the body to the aim is the only
+	// way to get that without an aim-offset animation blend.
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -40,15 +59,56 @@ AVantageCharacter::AVantageCharacter()
 	Movement->SetCrouchedHalfHeight(55.f);
 	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
 
+	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
+	SpringArm->SetupAttachment(GetCapsuleComponent());
+	SpringArm->SetRelativeLocation(FVector(0.f, 0.f, 62.f));
+	SpringArm->TargetArmLength = 285.f;
+	SpringArm->bUsePawnControlRotation = true;
+	// Offset to the right so the body does not sit on the crosshair.
+	SpringArm->SocketOffset = FVector(0.f, 68.f, 22.f);
+	SpringArm->bDoCollisionTest = true;
+	SpringArm->ProbeSize = 14.f;
+
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
-	Camera->SetupAttachment(GetCapsuleComponent());
-	Camera->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-	Camera->bUsePawnControlRotation = true;
-	Camera->FieldOfView = 95.f;
+	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
+	Camera->bUsePawnControlRotation = false;
+	Camera->FieldOfView = 90.f;
+
+	BodyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("BodyRoot"));
+	BodyRoot->SetupAttachment(GetCapsuleComponent());
+
+	// Everything from the shoulders out hangs off this, so a single pitch makes
+	// the arm, the gun and the light all track the aim together.
+	AimPivot = CreateDefaultSubobject<USceneComponent>(TEXT("AimPivot"));
+	AimPivot->SetupAttachment(BodyRoot);
+	AimPivot->SetRelativeLocation(FVector(0.f, 0.f, 44.f));
+
+	// Built around the capsule centre: feet at -92, crown near +90.
+	LeftLeg  = AddBodyPart(TEXT("LeftLeg"),  BodyRoot, FVector(0.f, -13.f, -52.f), FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator, TrouserColour);
+	RightLeg = AddBodyPart(TEXT("RightLeg"), BodyRoot, FVector(0.f, 13.f, -52.f),  FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator, TrouserColour);
+	Torso    = AddBodyPart(TEXT("Torso"),    BodyRoot, FVector(0.f, 0.f, 20.f),    FVector(15.f, 22.f, 30.f), FRotator::ZeroRotator, ShirtColour);
+	Coat     = AddBodyPart(TEXT("Coat"),     BodyRoot, FVector(-2.f, 0.f, 6.f),    FVector(17.f, 24.f, 24.f), FRotator::ZeroRotator, CoatColour);
+
+	Head     = AddBodyPart(TEXT("Head"),     BodyRoot, FVector(2.f, 0.f, 74.f),    FVector(12.f, 11.f, 13.f), FRotator::ZeroRotator, SkinColour);
+	Hair     = AddBodyPart(TEXT("Hair"),     BodyRoot, FVector(0.f, 0.f, 86.f),    FVector(12.5f, 11.5f, 4.f), FRotator::ZeroRotator, HairColour);
+
+	// The beard: a full jaw piece, a tapering point below it, and a moustache
+	// sitting proud of the face.
+	Beard      = AddBodyPart(TEXT("Beard"),      BodyRoot, FVector(9.f, 0.f, 63.f),  FVector(7.f, 10.f, 11.f),  FRotator::ZeroRotator, HairColour);
+	BeardTaper = AddBodyPart(TEXT("BeardTaper"), BodyRoot, FVector(8.f, 0.f, 49.f),  FVector(5.f, 6.5f, 6.f),   FRotator(6.f, 0.f, 0.f), HairColour);
+	Moustache  = AddBodyPart(TEXT("Moustache"),  BodyRoot, FVector(13.f, 0.f, 71.f), FVector(2.5f, 7.5f, 2.5f), FRotator::ZeroRotator, HairColour);
+
+	// Gun arm hangs off the aim pivot; the free arm swings with the walk.
+	GunArm  = AddBodyPart(TEXT("GunArm"),  AimPivot, FVector(16.f, 20.f, 0.f),   FVector(8.f, 8.f, 26.f), FRotator(72.f, 0.f, 0.f), CoatColour);
+	FreeArm = AddBodyPart(TEXT("FreeArm"), BodyRoot, FVector(0.f, -24.f, 20.f),  FVector(8.f, 8.f, 27.f), FRotator(8.f, 0.f, 0.f),  CoatColour);
+
+	GunHand = CreateDefaultSubobject<USceneComponent>(TEXT("GunHand"));
+	GunHand->SetupAttachment(AimPivot);
+	GunHand->SetRelativeLocation(FVector(42.f, 20.f, 1.f));
 
 	Flashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("Flashlight"));
-	Flashlight->SetupAttachment(Camera);
-	Flashlight->SetRelativeLocation(FVector(12.f, 10.f, -10.f));
+	Flashlight->SetupAttachment(AimPivot);
+	Flashlight->SetRelativeLocation(FVector(30.f, 14.f, 4.f));
 	Flashlight->IntensityUnits = ELightUnits::Unitless;
 	Flashlight->Intensity = 60000.f;
 	Flashlight->AttenuationRadius = 3000.f;
@@ -58,7 +118,32 @@ AVantageCharacter::AVantageCharacter()
 	Flashlight->CastShadows = true;
 	Flashlight->SetVisibility(false);
 
+	// No mesh and no animation assets, so the inherited skeletal mesh is dead
+	// weight. Hidden rather than removed, since ACharacter expects it present.
 	GetMesh()->SetVisibility(false);
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+
+UStaticMeshComponent* AVantageCharacter::AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation, const FLinearColor& Colour)
+{
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
+
+	UStaticMeshComponent* Part = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+	Part->SetupAttachment(Parent);
+	Part->SetRelativeLocation(Location);
+	Part->SetRelativeRotation(Rotation);
+	Part->SetRelativeScale3D(HalfExtent / MeshHalfSize);
+
+	if (CubeFinder.Succeeded())
+	{
+		Part->SetStaticMesh(CubeFinder.Object);
+	}
+
+	// The player's own geometry must never block his own shot, and the capsule
+	// already handles bumping into things.
+	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	return Part;
 }
 
 void AVantageCharacter::PostInitializeComponents()
@@ -73,8 +158,32 @@ void AVantageCharacter::BeginPlay()
 
 	Health = MaxHealth;
 
-	// The gun is its own actor snapped to the camera: the actor transform holds
-	// where it sits in the view, and its internal pivot is free to animate.
+	// Constructor-time tinting would apply to the class default object, so the
+	// dynamic material instances are made here instead.
+	auto Tint = [](UStaticMeshComponent* Part, const FLinearColor& Colour)
+	{
+		if (!Part)
+		{
+			return;
+		}
+		if (UMaterialInstanceDynamic* Material = Part->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			Material->SetVectorParameterValue(TEXT("Color"), Colour);
+		}
+	};
+
+	Tint(LeftLeg, TrouserColour);
+	Tint(RightLeg, TrouserColour);
+	Tint(Torso, ShirtColour);
+	Tint(Coat, CoatColour);
+	Tint(Head, SkinColour);
+	Tint(Hair, HairColour);
+	Tint(Beard, HairColour);
+	Tint(BeardTaper, HairColour);
+	Tint(Moustache, HairColour);
+	Tint(GunArm, CoatColour);
+	Tint(FreeArm, CoatColour);
+
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -82,9 +191,12 @@ void AVantageCharacter::BeginPlay()
 	Revolver = GetWorld()->SpawnActor<ARevolver>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
 	if (Revolver)
 	{
-		Revolver->AttachToComponent(Camera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		Revolver->SetActorRelativeLocation(FVector(27.f, 11.f, -11.5f));
-		Revolver->SetActorRelativeRotation(FRotator(-1.5f, -3.f, 0.f));
+		Revolver->AttachToComponent(GunHand, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		Revolver->SetActorRelativeLocation(FVector::ZeroVector);
+		Revolver->SetActorRelativeRotation(FRotator::ZeroRotator);
+		// Held at arm's length now rather than at the near plane, so it can be
+		// seen properly and wants to be a little larger than life.
+		Revolver->SetActorRelativeScale3D(FVector(1.35f));
 	}
 	else
 	{
@@ -102,6 +214,8 @@ void AVantageCharacter::Tick(float DeltaSeconds)
 	DamageFlash = FMath::Max(DamageFlash - DeltaSeconds * 1.6f, 0.f);
 	HitMarker = FMath::Max(HitMarker - DeltaSeconds * 3.2f, 0.f);
 
+	UpdateBody(DeltaSeconds);
+
 	if (bDown)
 	{
 		return;
@@ -112,6 +226,49 @@ void AVantageCharacter::Tick(float DeltaSeconds)
 	if (TimeSinceDamage > RegenDelay && Health < MaxHealth)
 	{
 		Health = FMath::Min(Health + RegenPerSecond * DeltaSeconds, MaxHealth);
+	}
+}
+
+void AVantageCharacter::UpdateBody(float DeltaSeconds)
+{
+	if (bDown)
+	{
+		// Slump forward and stay there until Revive puts him back.
+		const FRotator Slumped(78.f, 0.f, 12.f);
+		BodyRoot->SetRelativeRotation(FMath::RInterpTo(BodyRoot->GetRelativeRotation(), Slumped, DeltaSeconds, 5.f));
+		BodyRoot->SetRelativeLocation(FMath::VInterpTo(BodyRoot->GetRelativeLocation(), FVector(20.f, 0.f, -46.f), DeltaSeconds, 5.f));
+		return;
+	}
+
+	BodyRoot->SetRelativeRotation(FRotator::ZeroRotator);
+
+	// One phase drives the whole walk: legs opposed, free arm counter-swinging,
+	// and a bob at twice the rate so both footfalls read.
+	const float Speed = GetVelocity().Size2D();
+	const float Target = FMath::Clamp(Speed / FMath::Max(WalkSpeed, 1.f), 0.f, 1.7f);
+	GaitBlend = FMath::FInterpTo(GaitBlend, Target, DeltaSeconds, 7.f);
+	GaitPhase += DeltaSeconds * (5.2f + GaitBlend * 3.4f);
+
+	const float Swing = FMath::Sin(GaitPhase) * GaitBlend;
+
+	if (LeftLeg && RightLeg)
+	{
+		LeftLeg->SetRelativeRotation(FRotator(Swing * 34.f, 0.f, 0.f));
+		RightLeg->SetRelativeRotation(FRotator(-Swing * 34.f, 0.f, 0.f));
+	}
+
+	if (FreeArm)
+	{
+		FreeArm->SetRelativeRotation(FRotator(8.f - Swing * 22.f, 0.f, 0.f));
+	}
+
+	BodyRoot->SetRelativeLocation(FVector(0.f, 0.f, FMath::Abs(FMath::Sin(GaitPhase)) * 2.6f * GaitBlend));
+
+	// The arm and gun follow the camera's pitch, so he aims where you look.
+	if (AimPivot && Controller)
+	{
+		const float AimPitch = FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch);
+		AimPivot->SetRelativeRotation(FRotator(AimPitch, 0.f, 0.f));
 	}
 }
 
@@ -335,8 +492,9 @@ void AVantageCharacter::ResolveShot()
 		return;
 	}
 
-	// Trace from the view point, not the muzzle: the shot has to go exactly
-	// where the crosshair is, and the gun is held off to one side.
+	// Trace from the view point, not the muzzle. In third person the camera sits
+	// behind and right of him, so this is what puts the round under the
+	// crosshair rather than wherever the barrel happens to be pointing.
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);

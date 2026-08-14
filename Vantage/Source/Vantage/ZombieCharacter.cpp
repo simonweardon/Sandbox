@@ -156,6 +156,7 @@ void AZombieCharacter::Tick(float DeltaSeconds)
 
 	Phase += DeltaSeconds;
 	AttackCooldown = FMath::Max(AttackCooldown - DeltaSeconds, 0.f);
+	AttackLunge = FMath::Max(AttackLunge - DeltaSeconds * 3.2f, 0.f);
 
 	ChasePlayer(DeltaSeconds);
 	Shamble(DeltaSeconds);
@@ -187,7 +188,7 @@ void AZombieCharacter::ChasePlayer(float DeltaSeconds)
 		Player->TakeZombieHit(TouchDamage);
 
 		// Lunge, so a hit is visible as well as felt.
-		Phase += 0.9f;
+		AttackLunge = 1.f;
 	}
 }
 
@@ -198,8 +199,10 @@ void AZombieCharacter::Shamble(float DeltaSeconds)
 	const float Swing = FMath::Sin(Phase * GaitRate);
 	const float Bob = FMath::Sin(Phase * GaitRate * 2.f);
 
-	BodyRoot->SetRelativeRotation(FRotator(Swing * 3.f, 0.f, Swing * SwayAmount));
-	BodyRoot->SetRelativeLocation(FVector(0.f, 0.f, Bob * 2.6f));
+	// The lunge throws the whole body forward and down, which is what makes a
+	// swing read as a swing rather than the shambler simply arriving.
+	BodyRoot->SetRelativeRotation(FRotator(Swing * 3.f + AttackLunge * 26.f, 0.f, Swing * SwayAmount));
+	BodyRoot->SetRelativeLocation(FVector(AttackLunge * 24.f, 0.f, Bob * 2.6f));
 
 	if (LeftLeg && RightLeg)
 	{
@@ -209,8 +212,8 @@ void AZombieCharacter::Shamble(float DeltaSeconds)
 
 	if (LeftArm && RightArm)
 	{
-		LeftArm->SetRelativeRotation(FRotator(72.f + Swing * 7.f, 0.f, 0.f));
-		RightArm->SetRelativeRotation(FRotator(72.f - Swing * 7.f, 0.f, 0.f));
+		LeftArm->SetRelativeRotation(FRotator(72.f + Swing * 7.f + AttackLunge * 22.f, 0.f, 0.f));
+		RightArm->SetRelativeRotation(FRotator(72.f - Swing * 7.f + AttackLunge * 22.f, 0.f, 0.f));
 	}
 
 	if (Head)

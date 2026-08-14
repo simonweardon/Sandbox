@@ -1,14 +1,15 @@
 # Vantage
 
-A first-person desert survival demo for Unreal Engine 5, written entirely in
-C++. You stand in the sand among the ruins of a dead city with a six shooter,
-and the dead walk in out of the haze in waves.
+A third-person desert survival demo for Unreal Engine 5, written entirely in
+C++. A bearded gunslinger with a six shooter, the ruins of a dead city buried in
+sand, and a vault to reach with the dead standing between you and it.
 
 The unusual thing about it: **the project contains no content assets.** No
 `.umap`, no Blueprints, no meshes, no materials, no UMG widgets, no Enhanced
 Input assets, no animations. The desert, the towers, the revolver, the zombies
-and the HUD are all constructed in C++ at runtime from the primitive shapes that
-ship with the engine. Clone, build, press Play.
+and the gunslinger himself — beard included — are all constructed in C++ at
+runtime from the primitive shapes that ship with the engine. Clone, build, press
+Play.
 
 ## Running it
 
@@ -47,24 +48,33 @@ the whole tension of the thing.
 
 ## The loop
 
-Waves arrive on a timer with a countdown. Wave *N* fields `4 + (N-1)*2` zombies
-that spawn on a ring out in the haze and walk straight at you. Clear a wave and
-you get six seconds before the next. Health regenerates only after five seconds
-without being touched, so a bad wave carries into the next one. Death rolls the
-run back to wave one after a four second pause.
+**Get into the vault ruin to the north, take the cache, carry it back to the
+beacon you started on.** The vault is 46 metres out, past the ring the horde
+spawns on, and each wave puts an extra group directly in front of its door — so
+the objective is always on the far side of the dead.
+
+Waves arrive on a timer with a countdown. Wave *N* fields `4 + (N-1)*2` on the
+ring plus `3 + N` around the vault. Clear a wave and you get six seconds before
+the next. Health regenerates only after five seconds without being touched, so a
+bad wave carries into the next one.
+
+A HUD marker points at whatever you need next — a diamond when it is on screen,
+an arrow pinned to the screen edge when it is not, with the distance under it.
+Die and the run resets to wave one with the cache back in the vault.
 
 ## How it fits together
 
 | File | Responsibility |
 | --- | --- |
 | `VantageGameMode` | Waves, kills, death and restart; builds the map at `InitGame` |
-| `DesertBuilder` | Ground, ruined towers, cover, sky, sun and fog |
-| `VantageCharacter` | First-person pawn, health, and resolving the shot |
+| `DesertBuilder` | Ground, ruined towers, the vault, cover, sky, sun and fog |
+| `VantageCharacter` | The gunslinger: body, walk cycle, aim, health, and the shot |
+| `ObjectiveCache` | The thing in the vault, and noticing when you reach it |
 | `Revolver` | Ammo, reload, recoil kick, muzzle flash, cylinder spin |
 | `ZombieCharacter` | Chase steering, shambling gait, damage and collapse |
 | `VantageHUD` | Crosshair, hit markers, health, ammo, banners — all Canvas |
 
-Five decisions carry most of the weight.
+Six decisions carry most of the weight.
 
 ### Input assets are built in C++
 
@@ -126,6 +136,19 @@ from a body hit.
 The shot traces from the **view point**, not the muzzle, because the round has to
 go exactly where the crosshair is and the gun is held off to one side.
 
+### He is geometry, animated from code
+
+There is no skeletal mesh in this project, so the gunslinger is boxes: legs,
+torso, coat, head, hair, and a beard in three pieces — jaw, tapering point and
+moustache. The walk cycle is one sine wave with the legs opposed, the free arm
+counter-swinging and a bob at twice the rate so both footfalls read; it blends in
+and out with actual ground speed rather than with input.
+
+His gun arm hangs off an `AimPivot` that takes the camera's pitch, so the arm,
+the revolver and the flashlight all track where you are looking together. The
+body faces the camera yaw (`bUseControllerRotationYaw`), which is the only way to
+keep the gun pointing at the crosshair without an aim-offset animation blend.
+
 ### The HUD is Canvas, not UMG
 
 `AVantageHUD::DrawHUD` draws everything with `DrawRect`/`DrawText`. The damage
@@ -139,8 +162,10 @@ Most likely to want adjusting, in order:
 - **Light and fog.** Sun intensity, fog density and inscattering colour are all
   in `DesertBuilder::BuildSky`. This is the hardest thing to get right without
   looking at it.
-- **Gun placement in view.** `SetActorRelativeLocation` in
-  `AVantageCharacter::BeginPlay`, currently `(27, 11, -11.5)`.
+- **Camera framing.** `SpringArm` length and `SocketOffset` in the character
+  constructor, currently 285 back and 68 to the right.
+- **His proportions and beard.** The `AddBodyPart` calls in the character
+  constructor — half extents in centimetres around a capsule centre.
 - **Wave pressure.** `BaseWaveSize` and `IntermissionSeconds` on the game mode.
 - **Zombie speed.** The `MaxWalkSpeed` range in `AZombieCharacter::Randomise`.
 - **Lethality.** `BodyDamage` on the character, `TouchDamage` on the zombie.
@@ -157,6 +182,8 @@ Everything logs with a `Vantage:` prefix. Filter the Output Log on that first.
 | Everything grey | `"Color"` isn't the material's parameter name | Open `BasicShapeMaterial` and check |
 | No towers, no gun | `/Engine/BasicShapes` meshes missing | Logged as a warning at startup |
 | Zombies stand still | They only chase a live player | Check the player isn't already down |
+| Cannot find the vault | It is due north at (0, 4600) | Follow the HUD arrow; the beacon marks the way back |
+| Cache not picked up | Proximity is 170cm to the plinth | Walk into the glow rather than shooting it |
 
 The gun sits centimetres from the near plane and will clip through geometry if
 you press into a wall. Fixing that properly means a separate first-person render

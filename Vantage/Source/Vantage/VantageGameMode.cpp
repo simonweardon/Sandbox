@@ -1,6 +1,7 @@
 #include "VantageGameMode.h"
 
 #include "DesertBuilder.h"
+#include "ObjectiveCache.h"
 #include "VantageCharacter.h"
 #include "VantageHUD.h"
 #include "ZombieCharacter.h"
@@ -80,7 +81,15 @@ void AVantageGameMode::EnsureLevelBuilt()
 	// the spawn point does not depend on actor iteration order.
 	SpawnPoint = World->SpawnActor<APlayerStart>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
 
-	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s."), *SpawnLocation.ToCompactString());
+	World->SpawnActor<AObjectiveCache>(ADesertBuilder::CacheLocation, FRotator::ZeroRotator, SpawnParams);
+
+	// Cheap poll rather than a per-frame check on the character: extraction only
+	// matters once, and a third of a second is well inside human reaction time.
+	GetWorldTimerManager().SetTimer(
+		ExtractionTimer, this, &AVantageGameMode::CheckExtraction, 0.33f, true);
+
+	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s, cache at %s."),
+		*SpawnLocation.ToCompactString(), *ADesertBuilder::CacheLocation.ToCompactString());
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +132,45 @@ void AVantageGameMode::StartWave(int32 WaveNumber)
 		SpawnZombie(SpawnSalt++);
 	}
 
-	UE_LOG(LogVantage, Log, TEXT("Wave %d: %d shamblers."), Wave, Count);
+	// A standing group around the vault, so the objective is defended rather
+	// than merely distant. These are on top of the wave itself.
+	const int32 Guards = 3 + Wave;
+	SpawnVaultGuards(Guards, SpawnSalt);
+	SpawnSalt += Guards;
+
+	UE_LOG(LogVantage, Log, TEXT("Wave %d: %d shamblers, %d around the vault."), Wave, Count, Guards);
+}
+
+void AVantageGameMode::SpawnVaultGuards(int32 Count, int32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		FRandomStream Stream(Seed * 7919 + Index * 613 + Wave * 29);
+
+		// Scattered in front of the vault door, between it and the player.
+		const FVector At(
+			Stream.FRandRange(-900.f, 900.f),
+			Stream.FRandRange(3500.f, 4150.f),
+			120.f);
+
+		AZombieCharacter* Zombie = World->SpawnActor<AZombieCharacter>(
+			At, FRotator(0.f, Stream.FRandRange(0.f, 360.f), 0.f), SpawnParams);
+
+		if (Zombie)
+		{
+			Zombie->Randomise(Seed + Index * 31);
+			++ZombiesAlive;
+		}
+	}
 }
 
 void AVantageGameMode::SpawnZombie(int32 Seed)
@@ -189,6 +236,77 @@ void AVantageGameMode::NotifyPlayerDown()
 	GetWorldTimerManager().SetTimer(RestartTimer, this, &AVantageGameMode::RestartRun, 4.f, false);
 }
 
+void AVantageGameMode::NotifyCacheTaken()
+{
+	if (Objective != EVantageObjective::FetchCache)
+	{
+		return;
+	}
+
+	Objective = EVantageObjective::ReturnToExtraction;
+	UE_LOG(LogVantage, Log, TEXT("Cache taken on wave %d. Run it back."), Wave);
+}
+
+void AVantageGameMode::CheckExtraction()
+{
+	if (Objective != EVantageObjective::ReturnToExtraction || bPlayerDown)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	const AVantageCharacter* Player = PC ? Cast<AVantageCharacter>(PC->GetPawn()) : nullptr;
+	if (!Player)
+	{
+		return;
+	}
+
+	const FVector Pad = ADesertBuilder::ExtractionLocation;
+	if (FVector::DistSquared2D(Player->GetActorLocation(), Pad) > ExtractionRadius * ExtractionRadius)
+	{
+		return;
+	}
+
+	Objective = EVantageObjective::Complete;
+	GetWorldTimerManager().ClearTimer(IntermissionTimer);
+
+	UE_LOG(LogVantage, Log, TEXT("Extracted on wave %d with %d kills."), Wave, Kills);
+
+	// Let the win sit for a moment, then set the whole thing up again.
+	GetWorldTimerManager().SetTimer(RestartTimer, this, &AVantageGameMode::RestartRun, 8.f, false);
+}
+
+FText AVantageGameMode::GetObjectiveText() const
+{
+	switch (Objective)
+	{
+	case EVantageObjective::FetchCache:
+		return FText::FromString(TEXT("Reach the vault tower to the north"));
+
+	case EVantageObjective::ReturnToExtraction:
+		return FText::FromString(TEXT("Carry the cache back to the beacon"));
+
+	default:
+		return FText::FromString(TEXT("Extracted"));
+	}
+}
+
+FVector AVantageGameMode::GetObjectiveLocation() const
+{
+	switch (Objective)
+	{
+	case EVantageObjective::FetchCache:
+		return ADesertBuilder::VaultDoorLocation + FVector(0.f, 0.f, 260.f);
+
+	case EVantageObjective::ReturnToExtraction:
+		return ADesertBuilder::ExtractionLocation + FVector(0.f, 0.f, 620.f);
+
+	default:
+		return ADesertBuilder::ExtractionLocation;
+	}
+}
+
 void AVantageGameMode::RestartRun()
 {
 	UWorld* World = GetWorld();
@@ -208,6 +326,18 @@ void AVantageGameMode::RestartRun()
 	Kills = 0;
 	Wave = 0;
 	bPlayerDown = false;
+
+	// Put the cache back, whether the last run ended in a death or a win.
+	for (TActorIterator<AObjectiveCache> It(World); It; ++It)
+	{
+		It->Destroy();
+	}
+
+	Objective = EVantageObjective::FetchCache;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	World->SpawnActor<AObjectiveCache>(ADesertBuilder::CacheLocation, FRotator::ZeroRotator, SpawnParams);
 
 	if (const APlayerController* PC = World->GetFirstPlayerController())
 	{

@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 namespace
 {
@@ -50,6 +51,11 @@ void AVantageHUD::DrawHUD()
 
 	DrawAmmo(Revolver);
 	DrawRunState(GameMode);
+
+	if (GameMode && Player && !Player->IsDown() && GameMode->GetObjective() != EVantageObjective::Complete)
+	{
+		DrawObjectiveMarker(GameMode, Player);
+	}
 
 	if (Player && Player->IsDown())
 	{
@@ -194,6 +200,26 @@ void AVantageHUD::DrawRunState(const AVantageGameMode* GameMode)
 			InkDim, X, 92.f, Font, 1.f, false);
 	}
 
+	// Objective line, and a badge while the cache is in hand.
+	const FLinearColor ObjectiveColour = GameMode->IsCarryingCache() ? FLinearColor(0.20f, 0.95f, 0.70f, 1.f) : Sand;
+	DrawText(GameMode->GetObjectiveText().ToString(), ObjectiveColour, X, 118.f, Font, 1.f, false);
+
+	if (GameMode->IsCarryingCache())
+	{
+		DrawText(TEXT("CARRYING CACHE"), FLinearColor(0.20f, 0.95f, 0.70f, 1.f),
+			X, 144.f, GEngine->GetSmallFont(), 1.f, false);
+	}
+
+	if (GameMode->GetObjective() == EVantageObjective::Complete)
+	{
+		const float CentreX = Canvas->SizeX * 0.5f;
+		DrawRect(Shadow, 0.f, Canvas->SizeY * 0.32f - 26.f, Canvas->SizeX, 104.f);
+		DrawCentredText(TEXT("EXTRACTED"), FLinearColor(0.20f, 0.95f, 0.70f, 1.f),
+			CentreX, Canvas->SizeY * 0.32f - 10.f, GEngine->GetLargeFont(), 1.8f);
+		DrawCentredText(FString::Printf(TEXT("%d kills across %d waves"), GameMode->GetKills(), FMath::Max(GameMode->GetWave(), 1)),
+			Ink, CentreX, Canvas->SizeY * 0.32f + 44.f, GEngine->GetMediumFont(), 1.f);
+	}
+
 	if (GameMode->IsBetweenWaves() && !GameMode->IsPlayerDown())
 	{
 		const int32 Seconds = FMath::CeilToInt(GameMode->GetSecondsToNextWave());
@@ -207,6 +233,82 @@ void AVantageHUD::DrawRunState(const AVantageGameMode* GameMode)
 
 	DrawText(TEXT("WASD move   Shift sprint   LMB fire   R reload   F light   Space jump"),
 		InkDim, X, Canvas->SizeY - 40.f, GEngine->GetSmallFont(), 1.f, false);
+}
+
+void AVantageHUD::DrawObjectiveMarker(const AVantageGameMode* GameMode, const AVantageCharacter* Player)
+{
+	const APlayerController* PC = Cast<APlayerController>(Player->GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	const FVector Target = GameMode->GetObjectiveLocation();
+
+	// Behind-ness is worked out from the view vector rather than from Project's
+	// depth, because Project clamps and the sign is not dependable.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const bool bBehind = FVector::DotProduct(ViewRotation.Vector(), Target - ViewLocation) <= 0.f;
+
+	const FVector Projected = Canvas->Project(Target);
+
+	const float CentreX = Canvas->SizeX * 0.5f;
+	const float CentreY = Canvas->SizeY * 0.5f;
+	const float Margin = 70.f;
+
+	float X = Projected.X;
+	float Y = Projected.Y;
+
+	// Mirror through the centre when it is behind, so the arrow points the way
+	// you have to turn rather than the way you are facing.
+	if (bBehind)
+	{
+		X = Canvas->SizeX - X;
+		Y = Canvas->SizeY - Y;
+	}
+
+	const bool bOffScreen = bBehind
+		|| X < Margin || X > Canvas->SizeX - Margin
+		|| Y < Margin || Y > Canvas->SizeY - Margin;
+
+	if (bOffScreen)
+	{
+		FVector2D Direction(X - CentreX, Y - CentreY);
+		if (Direction.IsNearlyZero())
+		{
+			Direction = FVector2D(0.f, -1.f);
+		}
+		Direction.Normalize();
+
+		// Push out to whichever screen edge the direction hits first.
+		const float ScaleX = (CentreX - Margin) / FMath::Max(FMath::Abs(Direction.X), 0.0001f);
+		const float ScaleY = (CentreY - Margin) / FMath::Max(FMath::Abs(Direction.Y), 0.0001f);
+		const float Reach = FMath::Min(ScaleX, ScaleY);
+
+		X = CentreX + Direction.X * Reach;
+		Y = CentreY + Direction.Y * Reach;
+	}
+
+	const FLinearColor Colour = GameMode->IsCarryingCache()
+		? FLinearColor(0.20f, 0.95f, 0.70f, 1.f)
+		: Sand;
+
+	// Diamond outline, stepped out of small rects since Canvas has no rotation.
+	const int32 Radius = bOffScreen ? 11 : 8;
+	for (int32 Step = 0; Step <= Radius; ++Step)
+	{
+		const float Drop = static_cast<float>(Radius - Step);
+		DrawRect(Colour, X - Step, Y - Drop, 2.f, 2.f);
+		DrawRect(Colour, X + Step, Y - Drop, 2.f, 2.f);
+		DrawRect(Colour, X - Step, Y + Drop, 2.f, 2.f);
+		DrawRect(Colour, X + Step, Y + Drop, 2.f, 2.f);
+	}
+
+	const float Metres = FVector::Dist(Player->GetActorLocation(), Target) * 0.01f;
+	DrawCentredText(FString::Printf(TEXT("%dm"), FMath::RoundToInt(Metres)),
+		Colour, X, Y + Radius + 6.f, GEngine->GetSmallFont(), 1.f);
 }
 
 void AVantageHUD::DrawDamageVignette(float Strength)
