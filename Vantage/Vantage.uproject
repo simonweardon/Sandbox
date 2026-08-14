@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"EngineAssociation": "5.7",
 	"Category": "",
-	"Description": "Vantage - a first-person exploration demo built entirely in C++, with no content assets.",
+	"Description": "Vantage - a first-person desert survival demo built entirely in C++, with no content assets.",
 	"Modules": [
 		{
 			"Name": "Vantage",

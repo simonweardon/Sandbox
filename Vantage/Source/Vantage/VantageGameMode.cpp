@@ -1,11 +1,15 @@
 #include "VantageGameMode.h"
 
-#include "FacilityBuilder.h"
+#include "DesertBuilder.h"
 #include "VantageCharacter.h"
 #include "VantageHUD.h"
+#include "ZombieCharacter.h"
 
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVantage, Log, All);
 
@@ -39,6 +43,9 @@ void AVantageGameMode::StartPlay()
 {
 	EnsureLevelBuilt();
 	Super::StartPlay();
+
+	// First wave gets a breather so the player can look around before it lands.
+	BeginIntermission();
 }
 
 void AVantageGameMode::EnsureLevelBuilt()
@@ -59,14 +66,14 @@ void AVantageGameMode::EnsureLevelBuilt()
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	if (AFacilityBuilder* Builder = World->SpawnActor<AFacilityBuilder>(
+	if (ADesertBuilder* Builder = World->SpawnActor<ADesertBuilder>(
 		FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams))
 	{
 		Builder->Build();
 	}
 	else
 	{
-		UE_LOG(LogVantage, Error, TEXT("Failed to spawn AFacilityBuilder; the level will be empty."));
+		UE_LOG(LogVantage, Error, TEXT("Failed to spawn ADesertBuilder; the map will be empty."));
 	}
 
 	// Held on to directly rather than left for FindPlayerStart to discover, so
@@ -76,48 +83,139 @@ void AVantageGameMode::EnsureLevelBuilt()
 	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s."), *SpawnLocation.ToCompactString());
 }
 
-void AVantageGameMode::CollectShard()
+// ---------------------------------------------------------------------------
+// waves
+// ---------------------------------------------------------------------------
+
+void AVantageGameMode::BeginIntermission()
 {
-	ShardsCollected = FMath::Min(ShardsCollected + 1, ShardsRequired);
+	bBetweenWaves = true;
+
+	GetWorldTimerManager().SetTimer(
+		IntermissionTimer, this, &AVantageGameMode::OnIntermissionElapsed, IntermissionSeconds, false);
 }
 
-void AVantageGameMode::CompleteDemo()
+float AVantageGameMode::GetSecondsToNextWave() const
 {
-	if (bComplete)
+	if (!bBetweenWaves)
+	{
+		return 0.f;
+	}
+	return GetWorldTimerManager().GetTimerRemaining(IntermissionTimer);
+}
+
+void AVantageGameMode::OnIntermissionElapsed()
+{
+	bBetweenWaves = false;
+	StartWave(Wave + 1);
+}
+
+void AVantageGameMode::StartWave(int32 WaveNumber)
+{
+	Wave = WaveNumber;
+
+	// Grows steadily rather than sharply - the pressure should come from the
+	// reload window, not from the count alone.
+	const int32 Count = BaseWaveSize + (Wave - 1) * 2;
+
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		SpawnZombie(SpawnSalt++);
+	}
+
+	UE_LOG(LogVantage, Log, TEXT("Wave %d: %d shamblers."), Wave, Count);
+}
+
+void AVantageGameMode::SpawnZombie(int32 Seed)
+{
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
 
-	bComplete = true;
-	CompletionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	FRandomStream Stream(Seed * 7919 + Wave * 131);
+
+	// Spawn on a ring well outside the player's field of interest, so they walk
+	// in out of the haze rather than appearing in front of you.
+	const float Angle = Stream.FRandRange(0.f, 360.f);
+	const float Distance = Stream.FRandRange(1900.f, ADesertBuilder::ArenaRadius);
+
+	const FVector At(
+		FMath::Cos(FMath::DegreesToRadians(Angle)) * Distance,
+		FMath::Sin(FMath::DegreesToRadians(Angle)) * Distance,
+		120.f);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	AZombieCharacter* Zombie = World->SpawnActor<AZombieCharacter>(
+		At, FRotator(0.f, Stream.FRandRange(0.f, 360.f), 0.f), SpawnParams);
+
+	if (Zombie)
+	{
+		Zombie->Randomise(Seed);
+		++ZombiesAlive;
+	}
 }
 
-float AVantageGameMode::GetTimeSinceCompletion() const
+void AVantageGameMode::NotifyZombieKilled()
 {
-	if (!bComplete || !GetWorld())
+	++Kills;
+	ZombiesAlive = FMath::Max(ZombiesAlive - 1, 0);
+
+	if (ZombiesAlive == 0 && !bBetweenWaves && !bPlayerDown)
 	{
-		return 0.f;
+		BeginIntermission();
 	}
-	return GetWorld()->GetTimeSeconds() - CompletionTime;
 }
 
-FText AVantageGameMode::GetObjectiveText() const
+// ---------------------------------------------------------------------------
+// death and restart
+// ---------------------------------------------------------------------------
+
+void AVantageGameMode::NotifyPlayerDown()
 {
-	if (bComplete)
+	if (bPlayerDown)
 	{
-		return FText::FromString(TEXT("Vault core extracted."));
+		return;
 	}
 
-	if (bVaultOpen)
+	bPlayerDown = true;
+	GetWorldTimerManager().ClearTimer(IntermissionTimer);
+
+	UE_LOG(LogVantage, Log, TEXT("Player down on wave %d with %d kills."), Wave, Kills);
+
+	GetWorldTimerManager().SetTimer(RestartTimer, this, &AVantageGameMode::RestartRun, 4.f, false);
+}
+
+void AVantageGameMode::RestartRun()
+{
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		return FText::FromString(TEXT("Objective: reach the vault terminal"));
+		return;
 	}
 
-	if (ShardsCollected >= ShardsRequired)
+	// Clear the field. Iterating actors is fine here - it happens once per death,
+	// not per frame.
+	for (TActorIterator<AZombieCharacter> It(World); It; ++It)
 	{
-		return FText::FromString(TEXT("Objective: unseal the blast door"));
+		It->Destroy();
 	}
 
-	return FText::FromString(FString::Printf(
-		TEXT("Objective: recover %d resonance shards"), ShardsRequired));
+	ZombiesAlive = 0;
+	Kills = 0;
+	Wave = 0;
+	bPlayerDown = false;
+
+	if (const APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (AVantageCharacter* Player = Cast<AVantageCharacter>(PC->GetPawn()))
+		{
+			Player->Revive(SpawnLocation);
+		}
+	}
+
+	BeginIntermission();
 }

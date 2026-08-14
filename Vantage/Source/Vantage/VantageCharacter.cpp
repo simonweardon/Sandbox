@@ -1,10 +1,8 @@
 #include "VantageCharacter.h"
 
-#include "Interactable.h"
-#include "InteractionProbe.h"
+#include "Revolver.h"
 #include "VantageGameMode.h"
-
-#include "TimerManager.h"
+#include "ZombieCharacter.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -20,14 +18,14 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "TimerManager.h"
 
 AVantageCharacter::AVantageCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(38.f, 92.f);
 
-	// Yaw follows the controller, pitch stays on the camera only.
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -35,7 +33,7 @@ AVantageCharacter::AVantageCharacter()
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
 	Movement->bOrientRotationToMovement = false;
 	Movement->MaxWalkSpeed = WalkSpeed;
-	Movement->MaxWalkSpeedCrouched = 210.f;
+	Movement->MaxWalkSpeedCrouched = 230.f;
 	Movement->JumpZVelocity = 480.f;
 	Movement->AirControl = 0.35f;
 	Movement->BrakingDecelerationWalking = 2000.f;
@@ -48,7 +46,6 @@ AVantageCharacter::AVantageCharacter()
 	Camera->bUsePawnControlRotation = true;
 	Camera->FieldOfView = 95.f;
 
-	// Held slightly right of and below the eye line so its shadows read as handheld.
 	Flashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("Flashlight"));
 	Flashlight->SetupAttachment(Camera);
 	Flashlight->SetRelativeLocation(FVector(12.f, 10.f, -10.f));
@@ -61,9 +58,6 @@ AVantageCharacter::AVantageCharacter()
 	Flashlight->CastShadows = true;
 	Flashlight->SetVisibility(false);
 
-	InteractionProbe = CreateDefaultSubobject<UInteractionProbe>(TEXT("InteractionProbe"));
-
-	// Nothing to draw for the body in a bare first person demo.
 	GetMesh()->SetVisibility(false);
 }
 
@@ -77,50 +71,48 @@ void AVantageCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Cheap insurance rather than a per-frame tick: if the floor somehow was not
-	// there when we spawned, this catches the fall instead of dropping forever.
-	GetWorldTimerManager().SetTimer(
-		FallCheckTimer, this, &AVantageCharacter::CheckForFall, 0.5f, true);
+	Health = MaxHealth;
 
-	GetWorldTimerManager().SetTimer(
-		InputWatchdogTimer, this, &AVantageCharacter::ReportSilentInput, 8.f, false);
+	// The gun is its own actor snapped to the camera: the actor transform holds
+	// where it sits in the view, and its internal pivot is free to animate.
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	Revolver = GetWorld()->SpawnActor<ARevolver>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+	if (Revolver)
+	{
+		Revolver->AttachToComponent(Camera, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		Revolver->SetActorRelativeLocation(FVector(27.f, 11.f, -11.5f));
+		Revolver->SetActorRelativeRotation(FRotator(-1.5f, -3.f, 0.f));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("Vantage: revolver failed to spawn; the player is unarmed."));
+	}
+
+	GetWorldTimerManager().SetTimer(FallCheckTimer, this, &AVantageCharacter::CheckForFall, 0.5f, true);
+	GetWorldTimerManager().SetTimer(InputWatchdogTimer, this, &AVantageCharacter::ReportSilentInput, 8.f, false);
 }
 
-void AVantageCharacter::CheckForFall()
+void AVantageCharacter::Tick(float DeltaSeconds)
 {
-	if (GetActorLocation().Z > FallRecoveryZ)
+	Super::Tick(DeltaSeconds);
+
+	DamageFlash = FMath::Max(DamageFlash - DeltaSeconds * 1.6f, 0.f);
+	HitMarker = FMath::Max(HitMarker - DeltaSeconds * 3.2f, 0.f);
+
+	if (bDown)
 	{
 		return;
 	}
 
-	FVector Recovery(-480.f, 0.f, 110.f);
-	if (const AVantageGameMode* GameMode = GetWorld()->GetAuthGameMode<AVantageGameMode>())
+	// Regenerate only after a clear spell, so a fight still has a cost.
+	TimeSinceDamage += DeltaSeconds;
+	if (TimeSinceDamage > RegenDelay && Health < MaxHealth)
 	{
-		Recovery = GameMode->GetSpawnLocation();
+		Health = FMath::Min(Health + RegenPerSecond * DeltaSeconds, MaxHealth);
 	}
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("Vantage: player fell out of the level and was returned to %s. ")
-		TEXT("If this repeats immediately, the level geometry is not being built."),
-		*Recovery.ToCompactString());
-
-	GetCharacterMovement()->StopMovementImmediately();
-	SetActorLocation(Recovery, false, nullptr, ETeleportType::TeleportPhysics);
-}
-
-void AVantageCharacter::ReportSilentInput()
-{
-	if (bReceivedAnyInput)
-	{
-		return;
-	}
-
-	// Not fatal on its own - the player may simply not have touched anything -
-	// but if the game feels dead this is the first place to look.
-	UE_LOG(LogTemp, Warning,
-		TEXT("Vantage: no input received in the first 8 seconds. If nothing responds, check that ")
-		TEXT("Config/DefaultInput.ini sets DefaultPlayerInputClass and DefaultInputComponentClass ")
-		TEXT("to the EnhancedInput versions, and that the EnhancedInput plugin is enabled."));
 }
 
 void AVantageCharacter::BuildInputBindings()
@@ -145,7 +137,8 @@ void AVantageCharacter::BuildInputBindings()
 	JumpAction       = MakeAction(TEXT("IA_Jump"),       EInputActionValueType::Boolean);
 	SprintAction     = MakeAction(TEXT("IA_Sprint"),     EInputActionValueType::Boolean);
 	CrouchAction     = MakeAction(TEXT("IA_Crouch"),     EInputActionValueType::Boolean);
-	InteractAction   = MakeAction(TEXT("IA_Interact"),   EInputActionValueType::Boolean);
+	FireAction       = MakeAction(TEXT("IA_Fire"),       EInputActionValueType::Boolean);
+	ReloadAction     = MakeAction(TEXT("IA_Reload"),     EInputActionValueType::Boolean);
 	FlashlightAction = MakeAction(TEXT("IA_Flashlight"), EInputActionValueType::Boolean);
 
 	// A key press lands on the X axis, so anything that should read as
@@ -178,7 +171,7 @@ void AVantageCharacter::BuildInputBindings()
 	MapAxis(MoveAction, EKeys::Gamepad_LeftY, true,  false);
 
 	// Mouse deltas are already frame independent; stick deflection is not, so it
-	// gets its own action that Look() scales by delta time.
+	// gets its own action that LookRate scales by delta time.
 	InputContext->MapKey(LookAction, EKeys::Mouse2D);
 	MapAxis(LookRateAction, EKeys::Gamepad_RightX, false, false);
 	MapAxis(LookRateAction, EKeys::Gamepad_RightY, true,  false);
@@ -190,8 +183,10 @@ void AVantageCharacter::BuildInputBindings()
 	InputContext->MapKey(CrouchAction, EKeys::LeftControl);
 	InputContext->MapKey(CrouchAction, EKeys::C);
 	InputContext->MapKey(CrouchAction, EKeys::Gamepad_FaceButton_Right);
-	InputContext->MapKey(InteractAction, EKeys::E);
-	InputContext->MapKey(InteractAction, EKeys::Gamepad_FaceButton_Left);
+	InputContext->MapKey(FireAction, EKeys::LeftMouseButton);
+	InputContext->MapKey(FireAction, EKeys::Gamepad_RightTrigger);
+	InputContext->MapKey(ReloadAction, EKeys::R);
+	InputContext->MapKey(ReloadAction, EKeys::Gamepad_FaceButton_Left);
 	InputContext->MapKey(FlashlightAction, EKeys::F);
 	InputContext->MapKey(FlashlightAction, EKeys::Gamepad_FaceButton_Top);
 }
@@ -238,7 +233,8 @@ void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(SprintAction, ETriggerEvent::Started, this, &AVantageCharacter::StartSprint);
 	Input->BindAction(SprintAction, ETriggerEvent::Completed, this, &AVantageCharacter::StopSprint);
 	Input->BindAction(CrouchAction, ETriggerEvent::Started, this, &AVantageCharacter::ToggleCrouch);
-	Input->BindAction(InteractAction, ETriggerEvent::Started, this, &AVantageCharacter::TryInteract);
+	Input->BindAction(FireAction, ETriggerEvent::Started, this, &AVantageCharacter::FireWeapon);
+	Input->BindAction(ReloadAction, ETriggerEvent::Started, this, &AVantageCharacter::ReloadWeapon);
 	Input->BindAction(FlashlightAction, ETriggerEvent::Started, this, &AVantageCharacter::ToggleFlashlight);
 }
 
@@ -247,7 +243,7 @@ void AVantageCharacter::Move(const FInputActionValue& Value)
 	bReceivedAnyInput = true;
 
 	const FVector2D Axis = Value.Get<FVector2D>();
-	if (!Controller || Axis.IsNearlyZero())
+	if (!Controller || bDown || Axis.IsNearlyZero())
 	{
 		return;
 	}
@@ -300,27 +296,164 @@ void AVantageCharacter::ToggleCrouch()
 	}
 }
 
-void AVantageCharacter::TryInteract()
-{
-	if (!InteractionProbe)
-	{
-		return;
-	}
-
-	AActor* Focused = InteractionProbe->GetFocusedActor();
-	IInteractable* Interactable = Cast<IInteractable>(Focused);
-	if (!Interactable || !Interactable->CanInteract(this))
-	{
-		return;
-	}
-
-	Interactable->Interact(this);
-}
-
 void AVantageCharacter::ToggleFlashlight()
 {
 	if (Flashlight)
 	{
 		Flashlight->ToggleVisibility();
 	}
+}
+
+void AVantageCharacter::FireWeapon()
+{
+	bReceivedAnyInput = true;
+
+	if (bDown || !Revolver)
+	{
+		return;
+	}
+
+	if (!Revolver->Fire())
+	{
+		// Dry click on an empty gun starts the reload rather than doing nothing.
+		if (Revolver->IsEmpty())
+		{
+			Revolver->BeginReload();
+		}
+		return;
+	}
+
+	AddControllerPitchInput(-Revolver->RecoilPitch);
+	ResolveShot();
+}
+
+void AVantageCharacter::ResolveShot()
+{
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	// Trace from the view point, not the muzzle: the shot has to go exactly
+	// where the crosshair is, and the gun is held off to one side.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(VantageShot), true, this);
+	Params.AddIgnoredActor(this);
+	if (Revolver)
+	{
+		Params.AddIgnoredActor(Revolver);
+	}
+
+	FHitResult Hit;
+	const bool bHit = GetWorld()->LineTraceSingleByChannel(
+		Hit,
+		ViewLocation,
+		ViewLocation + ViewRotation.Vector() * ShotRange,
+		ECC_Visibility,
+		Params);
+
+	if (!bHit)
+	{
+		return;
+	}
+
+	AZombieCharacter* Zombie = Cast<AZombieCharacter>(Hit.GetActor());
+	if (!Zombie || Zombie->IsDead())
+	{
+		return;
+	}
+
+	const bool bHeadshot = Hit.Component.IsValid() && Hit.Component->ComponentHasTag(AZombieCharacter::HeadTag);
+	Zombie->ApplyHit(BodyDamage, bHeadshot);
+
+	bLastHitHeadshot = bHeadshot;
+	HitMarker = 1.f;
+}
+
+void AVantageCharacter::ReloadWeapon()
+{
+	bReceivedAnyInput = true;
+
+	if (!bDown && Revolver)
+	{
+		Revolver->BeginReload();
+	}
+}
+
+void AVantageCharacter::TakeZombieHit(float Damage)
+{
+	if (bDown)
+	{
+		return;
+	}
+
+	Health = FMath::Max(Health - Damage, 0.f);
+	TimeSinceDamage = 0.f;
+	DamageFlash = 1.f;
+
+	if (Health <= 0.f)
+	{
+		bDown = true;
+		GetCharacterMovement()->StopMovementImmediately();
+
+		if (AVantageGameMode* GameMode = GetWorld()->GetAuthGameMode<AVantageGameMode>())
+		{
+			GameMode->NotifyPlayerDown();
+		}
+	}
+}
+
+void AVantageCharacter::Revive(const FVector& At)
+{
+	bDown = false;
+	Health = MaxHealth;
+	TimeSinceDamage = 0.f;
+	DamageFlash = 0.f;
+
+	GetCharacterMovement()->StopMovementImmediately();
+	SetActorLocation(At, false, nullptr, ETeleportType::TeleportPhysics);
+
+	if (Revolver)
+	{
+		Revolver->BeginReload();
+	}
+}
+
+void AVantageCharacter::CheckForFall()
+{
+	if (GetActorLocation().Z > FallRecoveryZ)
+	{
+		return;
+	}
+
+	FVector Recovery(0.f, 0.f, 140.f);
+	if (const AVantageGameMode* GameMode = GetWorld()->GetAuthGameMode<AVantageGameMode>())
+	{
+		Recovery = GameMode->GetSpawnLocation();
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Vantage: player fell out of the level and was returned to %s. ")
+		TEXT("If this repeats immediately, the ground is not being built."),
+		*Recovery.ToCompactString());
+
+	GetCharacterMovement()->StopMovementImmediately();
+	SetActorLocation(Recovery, false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AVantageCharacter::ReportSilentInput()
+{
+	if (bReceivedAnyInput)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Vantage: no input received in the first 8 seconds. If nothing responds, check that ")
+		TEXT("Config/DefaultInput.ini sets DefaultPlayerInputClass and DefaultInputComponentClass ")
+		TEXT("to the EnhancedInput versions, and that the EnhancedInput plugin is enabled."));
 }

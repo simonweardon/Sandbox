@@ -1,54 +1,32 @@
 # Vantage
 
-A first-person exploration demo for Unreal Engine 5.4/5.5, written entirely in
-C++. Find three resonance shards, unseal a blast door, take the vault core.
+A first-person desert survival demo for Unreal Engine 5, written entirely in
+C++. You stand in the sand among the ruins of a dead city with a six shooter,
+and the dead walk in out of the haze in waves.
 
 The unusual thing about it: **the project contains no content assets.** No
 `.umap`, no Blueprints, no meshes, no materials, no UMG widgets, no Enhanced
-Input assets. Every wall, light, input binding and HUD element is constructed in
-C++ at runtime. Clone, generate project files, build, press Play.
-
-> **Untested build.** This was written without an engine to compile against, so
-> treat the first build as a shakedown rather than a guarantee. See
-> [If it doesn't compile](#if-it-doesnt-compile) — the likely failures are
-> narrow and listed there.
+Input assets, no animations. The desert, the towers, the revolver, the zombies
+and the HUD are all constructed in C++ at runtime from the primitive shapes that
+ship with the engine. Clone, build, press Play.
 
 ## Running it
 
-1. Install UE 5.4 or 5.5 and a C++ toolchain (Visual Studio 2022 with the
-   "Game development with C++" workload on Windows; Xcode on macOS).
-2. Right-click `Vantage.uproject` → **Generate Visual Studio project files**.
-   On macOS/Linux, run `<EngineDir>/Build/BatchFiles/Mac/GenerateProjectFiles.sh`
-   (or the `Linux/` equivalent) against the `.uproject`.
-3. Open the generated solution, build the **Development Editor** configuration
-   for the `Vantage` target.
-4. Launch the editor and press Play. The startup map is `/Engine/Maps/Entry`,
-   which is empty on purpose.
+```
+./Tools/build.sh     # finds your engine, builds, reports the first errors
+./Tools/run.sh       # launches the editor on this project
+```
 
-You can also double-click `Vantage.uproject` — the editor offers to rebuild the
-module for you — but the first build is quicker and easier to read from the IDE.
+Both take no arguments. `build.sh` searches the usual install roots and falls
+back to Spotlight; override with `UE_ROOT="/path/to/UE_5.7" ./Tools/build.sh`.
+On Windows use `Tools\build.bat`.
 
-## Work you need to do in the editor
+Do not launch the `.uproject` with `open` on macOS — the file association fails
+silently and the window vanishes with no error. `run.sh` invokes the editor
+binary directly and keeps the log on your terminal.
 
-**None, if it works.** There is nothing to author, import, wire up or configure.
-No Blueprints to create, no input assets to make, no level to lay out, no
-GameMode to assign in World Settings. Build, press Play.
-
-There is exactly **one** thing that might need you, and only if the demo starts
-in an empty void instead of the atrium: the project has to load *some* map, and
-it is pointed at `/Engine/Maps/Entry`, which ships with the engine and is empty.
-If your install doesn't have it, or its World Settings override the GameMode:
-
-1. **File → New Level → Empty Level**.
-2. Save it as `Content/Maps/Vantage`.
-3. **Edit → Project Settings → Maps & Modes**, set both *Editor Startup Map* and
-   *Game Default Map* to it.
-4. Check *Project Settings → Maps & Modes → Default GameMode* reads
-   `VantageGameMode`, and that the level's own **World Settings → GameMode
-   Override** is empty.
-
-That is a thirty second job and the only editor work in the project. Everything
-else is code.
+Built and run against **UE 5.7**. Targets use `BuildSettingsVersion.V6` and
+`EngineIncludeOrderVersion.Latest`; older engines will need those stepped back.
 
 ## Controls
 
@@ -56,145 +34,130 @@ else is code.
 | --- | --- | --- |
 | Move | WASD or arrows | Left stick |
 | Look | Mouse | Right stick |
+| Fire | Left mouse | Right trigger |
+| Reload | R | X |
 | Sprint | Hold Shift | Left stick click |
 | Crouch | Ctrl or C | B |
 | Jump | Space | A |
 | Flashlight | F | Y |
-| Interact | E | X |
 
-## The demo loop
+Two body shots kill a shambler; one to the head does it outright. Six rounds,
+then a two second reload — the crosshair opens up while you are empty, which is
+the whole tension of the thing.
 
-You start at the west end of a dark atrium. Two shards sit on plinths in the
-open; the third is tucked against the wall partway down the corridor east. With
-all three, the blast door at the end of the corridor can be unsealed, which
-opens onto the vault. The terminal on the dais at the far end ends the demo.
+## The loop
 
-The lit trim running along the base of every wall is deliberate level design,
-not decoration — with the flashlight off it is the only thing that reads, and it
-always points toward the next space.
+Waves arrive on a timer with a countdown. Wave *N* fields `4 + (N-1)*2` zombies
+that spawn on a ring out in the haze and walk straight at you. Clear a wave and
+you get six seconds before the next. Health regenerates only after five seconds
+without being touched, so a bad wave carries into the next one. Death rolls the
+run back to wave one after a four second pause.
 
 ## How it fits together
 
 | File | Responsibility |
 | --- | --- |
-| `VantageGameMode` | Objective state, and building the level at `InitGame` |
-| `FacilityBuilder` | Assembles all geometry and lighting from primitive cubes |
-| `VantageCharacter` | First-person pawn; builds its own Enhanced Input assets |
-| `InteractionProbe` | Per-frame view trace that decides what is under the crosshair |
-| `Interactable` | The interface everything interactive implements |
-| `ShardPickup` / `SlidingDoor` / `VaultTerminal` | The three interactive things |
-| `VantageHUD` | Crosshair, prompt, objective, banner — all Canvas draws |
+| `VantageGameMode` | Waves, kills, death and restart; builds the map at `InitGame` |
+| `DesertBuilder` | Ground, ruined towers, cover, sky, sun and fog |
+| `VantageCharacter` | First-person pawn, health, and resolving the shot |
+| `Revolver` | Ammo, reload, recoil kick, muzzle flash, cylinder spin |
+| `ZombieCharacter` | Chase steering, shambling gait, damage and collapse |
+| `VantageHUD` | Crosshair, hit markers, health, ammo, banners — all Canvas |
 
-Three decisions carry most of the weight, and each one is a tradeoff worth
-knowing about before you extend this.
+Five decisions carry most of the weight.
 
 ### Input assets are built in C++
 
 `AVantageCharacter::BuildInputBindings()` creates the `UInputMappingContext` and
-every `UInputAction` with `NewObject` at `PostInitializeComponents`, then binds
-them in `SetupPlayerInputComponent`. Normally these are `.uasset` files you
-author in the editor.
+every `UInputAction` with `NewObject` at `PostInitializeComponents`. Normally
+these are `.uasset` files authored in the editor.
 
-The fiddly part is that a key press arrives on the **X** axis, so anything that
-should read as forward/back needs a `UInputModifierSwizzleAxis` (`YXZ`) to move
-it to Y, then a `UInputModifierNegate` if it points the wrong way. That is what
-the `MapAxis` lambda encodes.
+The fiddly part: a key press arrives on the **X** axis, so anything that reads as
+forward/back needs a `UInputModifierSwizzleAxis` (`YXZ`) to move it to Y, then a
+`UInputModifierNegate` if it points the wrong way. That is what `MapAxis`
+encodes. Mouse look and stick look are separate actions because mouse deltas are
+already frame-independent and stick deflection is not.
 
-Mouse look and stick look are separate actions on purpose: mouse deltas are
-already frame-independent, stick deflection is not, so `LookRate` scales by
-delta time and `Look` does not. Merging them makes gamepad look framerate-
-dependent.
-
-`Config/DefaultInput.ini` sets `DefaultPlayerInputClass` and
+`Config/DefaultInput.ini` must set `DefaultPlayerInputClass` and
 `DefaultInputComponentClass` to the Enhanced Input versions. **Without those two
 lines nothing responds to the keyboard.** Both failure points log a distinct
-error naming the setting to fix, and a watchdog fires after eight seconds of
-total silence pointing at the same place — this failure is otherwise completely
-mute, which is what makes it expensive to diagnose.
+error naming the setting to fix, backed by a watchdog after eight silent seconds.
 
-### The level is spawned, not placed
+### The map is spawned, not placed
 
-`AFacilityBuilder` scales `/Engine/BasicShapes/Cube` into every wall, floor,
-crate and plinth, colouring each with a dynamic material instance. Coordinates
-are in centimetres, floor surface at `Z = 0`, player entering from the west.
+`ADesertBuilder` scales `/Engine/BasicShapes` primitives into every tower, wall,
+wreck and dune, colouring each with a dynamic material instance. A ruined tower
+is a shaft, one dark inset panel per face standing in for a window grid, floor
+bands, a broken crown of shrinking offset blocks, and a rubble skirt — about
+twenty components, seeded from an `FRandomStream` so it varies but stays stable.
 
-The build has to happen before the player pawn spawns, or the player drops into
-a world with no floor. `EnsureLevelBuilt()` is idempotent and called from three
-hooks in increasing order of desperation — `InitGame` (normal), then
-`ChoosePlayerStart` (which the engine guarantees runs *before* the pawn is
-spawned), then `StartPlay` (last resort). Only whichever fires first does any
-work. `AVantageCharacter` also runs a half-second timer that returns anyone who
-falls below `Z = -1200` to the spawn point, so a build failure degrades into a
-logged warning rather than falling through the void forever.
+Sun, `SkyAtmosphere`, a real-time-capture `SkyLight` and height fog are all
+**components on the builder actor** rather than placed actors, because light and
+sky actors default to Stationary mobility and cannot be positioned at runtime
+without complaint. Components let mobility be set before registration.
 
-Every spawned component sets `Movable` mobility **before** `RegisterComponent()`.
-Setting it after registration trips the "static component moved" warning, and
-nothing here can be baked anyway.
+The build runs from `InitGame`, with `EnsureLevelBuilt()` idempotent and also
+called from `ChoosePlayerStart` and `StartPlay`. `ChoosePlayerStart` is the one
+that matters — the engine guarantees it runs before the pawn is spawned, so the
+ground is down regardless of how the other hooks order themselves.
+
+### Zombies steer directly, with no navmesh
+
+Runtime navigation needs a bounds volume placed in a map, and there is no map to
+place one in. So `AZombieCharacter::ChasePlayer` flattens the vector to the
+player, normalises it and feeds `AddMovementInput`; the capsule slides along
+whatever it walks into. On open sand this is both simpler and good enough.
+
+The gait is one sine wave driving everything — body roll, bob, and legs and arms
+swinging in opposition off the same phase. Death topples `BodyRoot` forward over
+half a second and sinks the body into the sand. A real ragdoll would need a
+physics asset, which needs a skeletal mesh, which is exactly the dependency this
+project does without.
+
+### Headshots need the capsule to get out of the way
+
+The gun traces on `ECC_Visibility`. The zombie's capsule would swallow that
+trace before it reached anything, so the capsule is set to **ignore** that
+channel, and the body meshes are query-only blockers on it instead. The head
+carries a component tag; `ResolveShot` checks
+`Hit.Component->ComponentHasTag(AZombieCharacter::HeadTag)` to tell a head hit
+from a body hit.
+
+The shot traces from the **view point**, not the muzzle, because the round has to
+go exactly where the crosshair is and the gun is held off to one side.
 
 ### The HUD is Canvas, not UMG
 
-`AVantageHUD::DrawHUD` draws the crosshair, interaction prompt, objective line
-and shard pips with `DrawRect`/`DrawText`. Fonts come from `GEngine`. It costs
-some polish versus UMG and buys zero asset dependencies.
-
-## Troubleshooting
-
-Every failure below announces itself in the Output Log with a line starting
-`Vantage:`. Filter on that first.
-
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| Empty void, no room | Level never built, or the map overrode the GameMode | Check the log for `Level built`. If absent, see [editor work](#work-you-need-to-do-in-the-editor) |
-| Falling repeatedly | Geometry failed to spawn | Log will say so every half second; check the `Cube.Cube` load |
-| Nothing responds | Enhanced Input not wired | Log names the exact `DefaultInput.ini` setting |
-| Everything is grey | `"Color"` isn't the material's parameter name | Open `BasicShapeMaterial` and check |
-| Too dark to see | Light intensity guesses are off | Press F for the flashlight, then see [Tuning](#tuning) |
-
-### If it doesn't compile
-
-The code is written against the 5.4 API, but it has never been through a
-compiler. If something fails, these are the places to look first:
-
-- **`SetCrouchedHalfHeight`** — a setter only since 5.1. On older 5.x, assign
-  `CrouchedHalfHeight` directly.
-- **`ELightUnits` / `IntensityUnits`** — lives on `ULocalLightComponent`. If it
-  won't resolve, add `#include "Components/LocalLightComponent.h"`.
-- **`EKeys::Gamepad_LeftX`** and friends — stable for many versions, but if a
-  key constant is missing, delete that one `MapAxis` line; nothing else depends
-  on it.
-- **`"Color"` material parameter** — the vector parameter on
-  `/Engine/BasicShapes/BasicShapeMaterial`. If everything renders grey, that
-  parameter name is wrong for your engine version; open the material and check.
-  Setting a parameter that doesn't exist fails silently, which is exactly what
-  grey geometry looks like.
+`AVantageHUD::DrawHUD` draws everything with `DrawRect`/`DrawText`. The damage
+vignette is five nested translucent borders, which at those alphas reads as a
+gradient rather than the bands it actually is.
 
 ## Tuning
 
-Light intensity is the thing most likely to want adjusting, and the hardest to
-get right without looking at it. All the point lights use
-`ELightUnits::Unitless` with values in the 2,000–14,000 range, set in the
-`AddLight` calls in `FacilityBuilder.cpp`; the flashlight is 60,000 in
-`VantageCharacter`'s constructor. If the facility reads too dark or too flat,
-start there.
+Most likely to want adjusting, in order:
 
-Other quick knobs:
+- **Light and fog.** Sun intensity, fog density and inscattering colour are all
+  in `DesertBuilder::BuildSky`. This is the hardest thing to get right without
+  looking at it.
+- **Gun placement in view.** `SetActorRelativeLocation` in
+  `AVantageCharacter::BeginPlay`, currently `(27, 11, -11.5)`.
+- **Wave pressure.** `BaseWaveSize` and `IntermissionSeconds` on the game mode.
+- **Zombie speed.** The `MaxWalkSpeed` range in `AZombieCharacter::Randomise`.
+- **Lethality.** `BodyDamage` on the character, `TouchDamage` on the zombie.
 
-- Shard count: `ShardsRequired` on `AVantageGameMode`.
-- Move speed, sprint, sensitivity: `EditDefaultsOnly` properties on
-  `AVantageCharacter`.
-- Interaction range: `Reach` on `UInteractionProbe`, default 340cm.
-- Door timing: `OpenSeconds` and `OpenDistance` on `ASlidingDoor`.
+## Troubleshooting
 
-## Extending it
+Everything logs with a `Vantage:` prefix. Filter the Output Log on that first.
 
-Adding an interactive object means subclassing `AActor`, inheriting
-`IInteractable`, and overriding `GetInteractionPrompt` / `CanInteract` /
-`Interact`. `UInteractionProbe` picks it up with no registration step — it
-casts whatever the view trace hits. Note that the object needs collision that
-blocks the `Visibility` channel to be focusable at all; `AShardPickup` shows the
-query-only setup for something you want to look at but not bump into.
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Empty void | Map never built, or the level overrode the GameMode | Look for `Vantage: Level built` |
+| Falling repeatedly | Ground failed to spawn | Logged every half second; check the `Cube.Cube` load |
+| Nothing responds | Enhanced Input not wired | Log names the exact `DefaultInput.ini` setting |
+| Everything grey | `"Color"` isn't the material's parameter name | Open `BasicShapeMaterial` and check |
+| No towers, no gun | `/Engine/BasicShapes` meshes missing | Logged as a warning at startup |
+| Zombies stand still | They only chase a live player | Check the player isn't already down |
 
-The obvious next steps, roughly in order of payoff: a footstep and ambience pass
-(the space is silent, which is what most undersells it), a first-person arm mesh
-once you have a rig, and moving the layout in `FacilityBuilder` out to a data
-table so it can be edited without a rebuild.
+The gun sits centimetres from the near plane and will clip through geometry if
+you press into a wall. Fixing that properly means a separate first-person render
+pass, which is more machinery than a demo warrants.

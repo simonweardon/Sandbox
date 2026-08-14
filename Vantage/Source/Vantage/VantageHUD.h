@@ -4,11 +4,15 @@
 #include "GameFramework/HUD.h"
 #include "VantageHUD.generated.h"
 
+class ARevolver;
+class AVantageCharacter;
+class AVantageGameMode;
+
 /**
  * Everything on screen, drawn with Canvas primitives.
  *
  * UMG would mean .uasset widgets, which this project deliberately does without,
- * so the crosshair, prompt and objective line are all drawn by hand here.
+ * so the crosshair, bars and banners are all drawn by hand here.
  */
 UCLASS()
 class VANTAGE_API AVantageHUD : public AHUD
@@ -19,10 +23,13 @@ public:
 	virtual void DrawHUD() override;
 
 private:
-	void DrawCrosshair(bool bFocused, bool bLocked);
-	void DrawPrompt(const FText& Prompt, bool bLocked);
-	void DrawObjective(const FText& Objective, int32 Collected, int32 Required);
-	void DrawCompletionBanner(float TimeSinceCompletion);
+	void DrawCrosshair(const ARevolver* Revolver);
+	void DrawHitMarker(const AVantageCharacter* Player);
+	void DrawHealth(const AVantageCharacter* Player);
+	void DrawAmmo(const ARevolver* Revolver);
+	void DrawRunState(const AVantageGameMode* GameMode);
+	void DrawDamageVignette(float Strength);
+	void DrawDownBanner();
 
 	/** Centred text helper. Returns the width it drew. */
 	float DrawCentredText(const FString& Text, const FLinearColor& Colour, float CentreX, float Y, UFont* Font, float Scale);

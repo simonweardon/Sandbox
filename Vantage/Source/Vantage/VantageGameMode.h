@@ -1,18 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "GameFramework/GameModeBase.h"
 #include "VantageGameMode.generated.h"
 
 class APlayerStart;
 
 /**
- * Owns the demo's objective state and assembles the level.
+ * Owns the run - waves, kills, death and restart - and assembles the map.
  *
- * The level has to exist before the player pawn spawns, or the player is
- * dropped into an empty world with no floor. Rather than trust a single hook to
- * fire early enough, EnsureLevelBuilt() is idempotent and called from three
- * places, in increasing order of desperation:
+ * The map has to exist before the player pawn spawns, or the player is dropped
+ * into an empty world with no ground. Rather than trust a single hook to fire
+ * early enough, EnsureLevelBuilt() is idempotent and called from three places,
+ * in increasing order of desperation:
  *
  *   1. InitGame                - normal path, runs while the map is still empty
  *   2. ChoosePlayerStart       - guaranteed to run before the pawn is spawned
@@ -32,44 +33,56 @@ public:
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 	virtual void StartPlay() override;
 
-	int32 GetShardsCollected() const { return ShardsCollected; }
-	int32 GetShardsRequired() const { return ShardsRequired; }
-	bool IsVaultOpen() const { return bVaultOpen; }
-	bool IsComplete() const { return bComplete; }
+	int32 GetWave() const { return Wave; }
+	int32 GetKills() const { return Kills; }
+	int32 GetZombiesAlive() const { return ZombiesAlive; }
+	bool IsPlayerDown() const { return bPlayerDown; }
 
-	/** Where the player entered. Used to recover anyone who falls out of the map. */
+	/** True between waves. The HUD counts the break down. */
+	bool IsBetweenWaves() const { return bBetweenWaves; }
+	float GetSecondsToNextWave() const;
+
+	/** Where the player entered. Also used to recover anyone who falls out. */
 	FVector GetSpawnLocation() const { return SpawnLocation; }
 
-	/** Called by AShardPickup when the player takes one. */
-	void CollectShard();
+	/** Called by a zombie as it dies. */
+	void NotifyZombieKilled();
 
-	/** Called by ASlidingDoor once it has finished opening. */
-	void NotifyVaultOpened() { bVaultOpen = true; }
-
-	/** Called by AVaultTerminal. Ends the demo. */
-	void CompleteDemo();
-
-	/** The single line of objective text the HUD shows. */
-	FText GetObjectiveText() const;
-
-	/** Seconds since the demo was completed, or 0 while still playing. */
-	float GetTimeSinceCompletion() const;
+	/** Called by the player character when its health reaches zero. */
+	void NotifyPlayerDown();
 
 private:
-	/** Builds the level exactly once, whichever hook gets here first. */
 	void EnsureLevelBuilt();
 
+	void StartWave(int32 WaveNumber);
+	void BeginIntermission();
+	void OnIntermissionElapsed();
+
+	/** Spawns one zombie on a ring around the arena, clear of the player. */
+	void SpawnZombie(int32 Seed);
+
+	void RestartRun();
+
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage")
-	int32 ShardsRequired = 3;
+	float IntermissionSeconds = 6.f;
+
+	/** Wave N fields this many shamblers. */
+	UPROPERTY(EditDefaultsOnly, Category = "Vantage")
+	int32 BaseWaveSize = 4;
 
 	UPROPERTY(Transient)
 	TObjectPtr<APlayerStart> SpawnPoint;
 
-	FVector SpawnLocation = FVector(-480.f, 0.f, 110.f);
+	FVector SpawnLocation = FVector(0.f, 0.f, 140.f);
+
+	FTimerHandle IntermissionTimer;
+	FTimerHandle RestartTimer;
 
 	bool bLevelBuilt = false;
-	int32 ShardsCollected = 0;
-	bool bVaultOpen = false;
-	bool bComplete = false;
-	float CompletionTime = 0.f;
+	bool bBetweenWaves = false;
+	bool bPlayerDown = false;
+	int32 Wave = 0;
+	int32 Kills = 0;
+	int32 ZombiesAlive = 0;
+	int32 SpawnSalt = 1;
 };
