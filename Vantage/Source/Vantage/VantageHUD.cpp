@@ -1,6 +1,9 @@
 #include "VantageHUD.h"
 
+#include "CodeLock.h"
+#include "DesertBuilder.h"
 #include "Revolver.h"
+#include "RobotDog.h"
 #include "VantageCharacter.h"
 #include "VantageGameMode.h"
 
@@ -57,10 +60,182 @@ void AVantageHUD::DrawHUD()
 		DrawObjectiveMarker(GameMode, Player);
 	}
 
+	if (Player)
+	{
+		DrawDogStatus(Player);
+		DrawPlaque(GameMode, Player);
+		DrawReachPrompt(Player);
+		DrawLockPanel(Player);
+	}
+
 	if (Player && Player->IsDown())
 	{
 		DrawDownBanner();
 	}
+}
+
+void AVantageHUD::DrawReachPrompt(const AVantageCharacter* Player)
+{
+	const FString Text = Player->GetReachPrompt().ToString();
+	if (Text.IsEmpty() || Player->IsDown())
+	{
+		return;
+	}
+
+	UFont* Font = GEngine->GetMediumFont();
+	const float CentreX = Canvas->SizeX * 0.5f;
+	const float Y = Canvas->SizeY * 0.5f + 52.f;
+
+	float Width = 0.f;
+	float Height = 0.f;
+	GetTextSize(Text, Width, Height, Font, 1.f);
+
+	DrawRect(Shadow, CentreX - Width * 0.5f - 14.f, Y - 7.f, Width + 28.f, Height + 14.f);
+	DrawCentredText(Text, Ink, CentreX, Y, Font, 1.f);
+}
+
+void AVantageHUD::DrawLockPanel(const AVantageCharacter* Player)
+{
+	const ACodeLock* Lock = Player->GetActiveLock();
+	if (!Lock)
+	{
+		return;
+	}
+
+	const int32 Count = Lock->GetDigitCount();
+	if (Count <= 0)
+	{
+		return;
+	}
+
+	const float CellW = 68.f;
+	const float CellH = 92.f;
+	const float Gap = 16.f;
+	const float TotalW = Count * CellW + (Count - 1) * Gap;
+
+	const float X = Canvas->SizeX * 0.5f - TotalW * 0.5f;
+	const float Y = Canvas->SizeY * 0.5f - CellH * 0.5f;
+
+	// Dim the world behind it, so the dials are unmistakably the thing in focus.
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.55f), 0.f, 0.f, Canvas->SizeX, Canvas->SizeY);
+
+	// Whole panel flashes red on a wrong combination.
+	const float Reject = Lock->GetRejectFlash();
+	const FLinearColor Frame = FMath::Lerp(Sand, Blood, Reject);
+
+	DrawCentredText(TEXT("VAULT LOCK"), Frame, Canvas->SizeX * 0.5f, Y - 62.f, GEngine->GetLargeFont(), 1.3f);
+
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const float CellX = X + Index * (CellW + Gap);
+		const bool bSelected = Index == Lock->GetCursor();
+
+		DrawRect(FLinearColor(0.09f, 0.09f, 0.10f, 0.95f), CellX, Y, CellW, CellH);
+
+		// The selected dial gets a thicker, brighter surround.
+		const FLinearColor Edge = bSelected ? Frame : InkDim;
+		const float Thickness = bSelected ? 3.f : 1.f;
+		DrawRect(Edge, CellX, Y, CellW, Thickness);
+		DrawRect(Edge, CellX, Y + CellH - Thickness, CellW, Thickness);
+		DrawRect(Edge, CellX, Y, Thickness, CellH);
+		DrawRect(Edge, CellX + CellW - Thickness, Y, Thickness, CellH);
+
+		DrawCentredText(FString::Printf(TEXT("%d"), Lock->GetDigit(Index)),
+			bSelected ? Ink : InkDim, CellX + CellW * 0.5f, Y + 22.f, GEngine->GetLargeFont(), 2.f);
+
+		if (bSelected)
+		{
+			// Little chevrons, so it is obvious which way the dial turns.
+			DrawCentredText(TEXT("^"), Frame, CellX + CellW * 0.5f, Y - 24.f, GEngine->GetMediumFont(), 1.f);
+			DrawCentredText(TEXT("v"), Frame, CellX + CellW * 0.5f, Y + CellH + 4.f, GEngine->GetMediumFont(), 1.f);
+		}
+	}
+
+	DrawCentredText(TEXT("A / D  select      W / S  turn      E  try it      R  step back"),
+		InkDim, Canvas->SizeX * 0.5f, Y + CellH + 44.f, GEngine->GetMediumFont(), 1.f);
+
+	if (Reject > 0.f)
+	{
+		FLinearColor Warn = Blood;
+		Warn.A = Reject;
+		DrawCentredText(TEXT("REJECTED"), Warn, Canvas->SizeX * 0.5f, Y + CellH + 76.f, GEngine->GetMediumFont(), 1.2f);
+	}
+}
+
+void AVantageHUD::DrawPlaque(const AVantageGameMode* GameMode, const AVantageCharacter* Player)
+{
+	if (!GameMode || Player->GetActiveLock())
+	{
+		return;
+	}
+
+	const TArray<int32>& Code = GameMode->GetCombination();
+	if (Code.Num() == 0)
+	{
+		return;
+	}
+
+	// Only legible when he is actually stood at it, which is what makes finding
+	// it worth doing rather than something the HUD hands over for free.
+	const float Distance = FVector::Dist(Player->GetActorLocation(), ADesertBuilder::PlaqueLocation);
+	if (Distance > 330.f)
+	{
+		return;
+	}
+
+	FString Digits;
+	for (int32 Digit : Code)
+	{
+		Digits += FString::Printf(TEXT("%d  "), Digit);
+	}
+
+	const float CentreX = Canvas->SizeX * 0.5f;
+	const float Y = Canvas->SizeY * 0.30f;
+
+	// Fades up over the last metre, rather than snapping on.
+	const float Alpha = FMath::Clamp((330.f - Distance) / 90.f, 0.f, 1.f);
+
+	FLinearColor Panel = Shadow;
+	Panel.A *= Alpha;
+	FLinearColor Text = Sand;
+	Text.A = Alpha;
+
+	DrawRect(Panel, CentreX - 190.f, Y - 14.f, 380.f, 92.f);
+	DrawCentredText(TEXT("VAULT ACCESS"), Text, CentreX, Y, GEngine->GetMediumFont(), 1.f);
+	DrawCentredText(Digits.TrimEnd(), Text, CentreX, Y + 28.f, GEngine->GetLargeFont(), 2.f);
+}
+
+void AVantageHUD::DrawDogStatus(const AVantageCharacter* Player)
+{
+	const ARobotDog* Dog = Player->GetDog();
+	if (!Dog)
+	{
+		return;
+	}
+
+	const float X = 44.f;
+	const float Y = Canvas->SizeY - 106.f;
+
+	FString Label;
+	FLinearColor Colour = InkDim;
+
+	switch (Dog->GetState())
+	{
+	case EDogState::Hunt:
+		Label = TEXT("DOG  hunting");
+		Colour = FLinearColor(1.f, 0.45f, 0.15f, 1.f);
+		break;
+	case EDogState::Rebooting:
+		Label = TEXT("DOG  rebooting");
+		Colour = Blood;
+		break;
+	default:
+		Label = TEXT("DOG  at heel");
+		Colour = FLinearColor(0.25f, 0.85f, 1.f, 1.f);
+		break;
+	}
+
+	DrawText(Label, Colour, X, Y, GEngine->GetSmallFont(), 1.f, false);
 }
 
 void AVantageHUD::DrawCrosshair(const ARevolver* Revolver)

@@ -1,6 +1,8 @@
 #include "VantageCharacter.h"
 
+#include "CodeLock.h"
 #include "Revolver.h"
+#include "RobotDog.h"
 #include "VantageGameMode.h"
 #include "ZombieCharacter.h"
 
@@ -14,6 +16,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -33,7 +36,14 @@ namespace
 	const FLinearColor CoatColour    (0.270f, 0.185f, 0.120f);
 	const FLinearColor ShirtColour   (0.415f, 0.355f, 0.270f);
 	const FLinearColor TrouserColour (0.190f, 0.170f, 0.160f);
+	const FLinearColor BootColour    (0.120f, 0.095f, 0.080f);
 	const FLinearColor HairColour    (0.155f, 0.100f, 0.065f);
+	const FLinearColor HatColour     (0.185f, 0.135f, 0.090f);
+	const FLinearColor BandColour    (0.095f, 0.070f, 0.050f);
+	const FLinearColor LeatherColour (0.135f, 0.090f, 0.055f);
+
+	/** Resting pitch of the gun arm. Nearly level, angled a touch down. */
+	constexpr float GunShoulderRest = -80.f;
 }
 
 AVantageCharacter::AVantageCharacter()
@@ -42,9 +52,6 @@ AVantageCharacter::AVantageCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(38.f, 92.f);
 
-	// Third person, but he still faces wherever the camera looks: the gun has to
-	// point where the crosshair is, and turning the body to the aim is the only
-	// way to get that without an aim-offset animation blend.
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -58,13 +65,14 @@ AVantageCharacter::AVantageCharacter()
 	Movement->BrakingDecelerationWalking = 2000.f;
 	Movement->SetCrouchedHalfHeight(55.f);
 	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
+	// The stairs into the vault rise in 22cm treads; the default 45 clears them.
+	Movement->MaxStepHeight = 45.f;
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetCapsuleComponent());
 	SpringArm->SetRelativeLocation(FVector(0.f, 0.f, 62.f));
 	SpringArm->TargetArmLength = 285.f;
 	SpringArm->bUsePawnControlRotation = true;
-	// Offset to the right so the body does not sit on the crosshair.
 	SpringArm->SocketOffset = FVector(0.f, 68.f, 22.f);
 	SpringArm->bDoCollisionTest = true;
 	SpringArm->ProbeSize = 14.f;
@@ -72,42 +80,70 @@ AVantageCharacter::AVantageCharacter()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm, USpringArmComponent::SocketName);
 	Camera->bUsePawnControlRotation = false;
-	Camera->FieldOfView = 90.f;
+	Camera->FieldOfView = BaseFieldOfView;
 
 	BodyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("BodyRoot"));
 	BodyRoot->SetupAttachment(GetCapsuleComponent());
 
-	// Everything from the shoulders out hangs off this, so a single pitch makes
-	// the arm, the gun and the light all track the aim together.
 	AimPivot = CreateDefaultSubobject<USceneComponent>(TEXT("AimPivot"));
 	AimPivot->SetupAttachment(BodyRoot);
 	AimPivot->SetRelativeLocation(FVector(0.f, 0.f, 44.f));
 
-	// Built around the capsule centre: feet at -92, crown near +90.
-	LeftLeg  = AddBodyPart(TEXT("LeftLeg"),  BodyRoot, FVector(0.f, -13.f, -52.f), FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator);
-	RightLeg = AddBodyPart(TEXT("RightLeg"), BodyRoot, FVector(0.f, 13.f, -52.f),  FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator);
-	Torso    = AddBodyPart(TEXT("Torso"),    BodyRoot, FVector(0.f, 0.f, 20.f),    FVector(15.f, 22.f, 30.f), FRotator::ZeroRotator);
-	Coat     = AddBodyPart(TEXT("Coat"),     BodyRoot, FVector(-2.f, 0.f, 6.f),    FVector(17.f, 24.f, 24.f), FRotator::ZeroRotator);
+	// --- torso and head, which never articulate -----------------------------
+	Torso = AddBodyPart(TEXT("Torso"), BodyRoot, FVector(0.f, 0.f, 20.f), FVector(15.f, 22.f, 30.f), FRotator::ZeroRotator);
+	Coat  = AddBodyPart(TEXT("Coat"),  BodyRoot, FVector(-2.f, 0.f, 6.f), FVector(17.f, 24.f, 24.f), FRotator::ZeroRotator);
 
-	// Head sits low enough to meet the torso: the shoulders top out at Z 50, so
-	// anything above about Z 63 leaves him decapitated with a gap for a neck.
-	Head     = AddBodyPart(TEXT("Head"),     BodyRoot, FVector(2.f, 0.f, 62.f),    FVector(12.f, 11.f, 13.f), FRotator::ZeroRotator);
-	Hair     = AddBodyPart(TEXT("Hair"),     BodyRoot, FVector(0.f, 0.f, 74.f),    FVector(12.5f, 11.5f, 4.f), FRotator::ZeroRotator);
+	Head = AddBodyPart(TEXT("Head"), BodyRoot, FVector(2.f, 0.f, 62.f), FVector(12.f, 11.f, 13.f), FRotator::ZeroRotator);
+	Hair = AddBodyPart(TEXT("Hair"), BodyRoot, FVector(-2.f, 0.f, 71.f), FVector(11.f, 11.5f, 4.f), FRotator::ZeroRotator);
 
-	// The beard: a full jaw piece, a tapering point below it, and a moustache
-	// sitting proud of the face. Pushed forward in X so it hangs in front of the
-	// chest rather than inside it.
+	// Wide brimmed hat: brim, band, crown. The brim is what carries the
+	// silhouette from a distance, so it is deliberately oversized.
+	HatBrim  = AddBodyPart(TEXT("HatBrim"),  BodyRoot, FVector(2.f, 0.f, 77.f), FVector(21.f, 20.f, 2.f),  FRotator(-3.f, 0.f, 0.f));
+	HatBand  = AddBodyPart(TEXT("HatBand"),  BodyRoot, FVector(2.f, 0.f, 81.f), FVector(12.5f, 11.5f, 2.5f), FRotator::ZeroRotator);
+	HatCrown = AddBodyPart(TEXT("HatCrown"), BodyRoot, FVector(2.f, 0.f, 89.f), FVector(12.f, 11.f, 8.f),  FRotator::ZeroRotator);
+
 	Beard      = AddBodyPart(TEXT("Beard"),      BodyRoot, FVector(10.f, 0.f, 54.f), FVector(7.f, 9.5f, 10.f),  FRotator::ZeroRotator);
 	BeardTaper = AddBodyPart(TEXT("BeardTaper"), BodyRoot, FVector(12.f, 0.f, 42.f), FVector(4.5f, 5.5f, 5.5f), FRotator(7.f, 0.f, 0.f));
 	Moustache  = AddBodyPart(TEXT("Moustache"),  BodyRoot, FVector(14.f, 0.f, 59.f), FVector(2.5f, 7.5f, 2.5f), FRotator::ZeroRotator);
 
-	// Gun arm hangs off the aim pivot; the free arm swings with the walk.
-	GunArm  = AddBodyPart(TEXT("GunArm"),  AimPivot, FVector(16.f, 20.f, 0.f),   FVector(8.f, 8.f, 26.f), FRotator(72.f, 0.f, 0.f));
-	FreeArm = AddBodyPart(TEXT("FreeArm"), BodyRoot, FVector(0.f, -24.f, 20.f),  FVector(8.f, 8.f, 27.f), FRotator(8.f, 0.f, 0.f));
+	// Coat collar turned up, a belt at the waist, and tails hanging behind -
+	// the three pieces that stop the coat reading as one plain box.
+	Collar    = AddBodyPart(TEXT("Collar"),    BodyRoot, FVector(-2.f, 0.f, 46.f),     FVector(16.f, 24.f, 6.f),  FRotator::ZeroRotator);
+	Belt      = AddBodyPart(TEXT("Belt"),      BodyRoot, FVector(-1.f, 0.f, -8.f),     FVector(18.f, 25.f, 4.f),  FRotator::ZeroRotator);
+	LeftTail  = AddBodyPart(TEXT("LeftTail"),  BodyRoot, FVector(-15.f, -11.f, -22.f), FVector(5.f, 11.f, 24.f),  FRotator(4.f, 0.f, 0.f));
+	RightTail = AddBodyPart(TEXT("RightTail"), BodyRoot, FVector(-15.f, 11.f, -22.f),  FVector(5.f, 11.f, 24.f),  FRotator(4.f, 0.f, 0.f));
+
+	// --- legs: hip to knee to ankle -----------------------------------------
+	// Hips sit at Z -10 and the feet land at -92, so thigh and shin split the
+	// 82cm between them and the boot makes up the rest.
+	LeftHip = AddJoint(TEXT("LeftHip"), BodyRoot, FVector(0.f, -13.f, -10.f));
+	LeftThigh = AddBone(TEXT("LeftThigh"), LeftHip, FVector(10.f, 9.f, 20.f));
+	LeftKnee = AddJoint(TEXT("LeftKnee"), LeftHip, FVector(0.f, 0.f, -40.f));
+	LeftShin = AddBone(TEXT("LeftShin"), LeftKnee, FVector(8.5f, 8.f, 19.f));
+	LeftFoot = AddBodyPart(TEXT("LeftFoot"), LeftKnee, FVector(6.f, 0.f, -38.f), FVector(13.f, 9.f, 4.f), FRotator::ZeroRotator);
+
+	RightHip = AddJoint(TEXT("RightHip"), BodyRoot, FVector(0.f, 13.f, -10.f));
+	RightThigh = AddBone(TEXT("RightThigh"), RightHip, FVector(10.f, 9.f, 20.f));
+	RightKnee = AddJoint(TEXT("RightKnee"), RightHip, FVector(0.f, 0.f, -40.f));
+	RightShin = AddBone(TEXT("RightShin"), RightKnee, FVector(8.5f, 8.f, 19.f));
+	RightFoot = AddBodyPart(TEXT("RightFoot"), RightKnee, FVector(6.f, 0.f, -38.f), FVector(13.f, 9.f, 4.f), FRotator::ZeroRotator);
+
+	// --- arms: shoulder to elbow to hand ------------------------------------
+	// The gun shoulder starts pitched nearly flat so the arm reaches forward
+	// rather than hanging; the free arm hangs and swings with the walk.
+	GunShoulder = AddJoint(TEXT("GunShoulder"), AimPivot, FVector(4.f, 20.f, 2.f), FRotator(GunShoulderRest, 0.f, 0.f));
+	GunUpperArm = AddBone(TEXT("GunUpperArm"), GunShoulder, FVector(7.5f, 7.5f, 13.f));
+	GunElbow = AddJoint(TEXT("GunElbow"), GunShoulder, FVector(0.f, 0.f, -26.f));
+	GunForearm = AddBone(TEXT("GunForearm"), GunElbow, FVector(6.5f, 6.5f, 12.f));
 
 	GunHand = CreateDefaultSubobject<USceneComponent>(TEXT("GunHand"));
-	GunHand->SetupAttachment(AimPivot);
-	GunHand->SetRelativeLocation(FVector(42.f, 20.f, 1.f));
+	GunHand->SetupAttachment(GunElbow);
+	GunHand->SetRelativeLocation(FVector(0.f, 0.f, -24.f));
+
+	FreeShoulder = AddJoint(TEXT("FreeShoulder"), BodyRoot, FVector(0.f, -24.f, 44.f), FRotator(-6.f, 0.f, 0.f));
+	FreeUpperArm = AddBone(TEXT("FreeUpperArm"), FreeShoulder, FVector(7.5f, 7.5f, 14.f));
+	FreeElbow = AddJoint(TEXT("FreeElbow"), FreeShoulder, FVector(0.f, 0.f, -28.f));
+	FreeForearm = AddBone(TEXT("FreeForearm"), FreeElbow, FVector(6.5f, 6.5f, 13.f));
 
 	Flashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("Flashlight"));
 	Flashlight->SetupAttachment(AimPivot);
@@ -121,10 +157,24 @@ AVantageCharacter::AVantageCharacter()
 	Flashlight->CastShadows = true;
 	Flashlight->SetVisibility(false);
 
-	// No mesh and no animation assets, so the inherited skeletal mesh is dead
-	// weight. Hidden rather than removed, since ACharacter expects it present.
 	GetMesh()->SetVisibility(false);
 	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+}
+
+USceneComponent* AVantageCharacter::AddJoint(const TCHAR* Name, USceneComponent* Parent, const FVector& Offset, const FRotator& Rotation)
+{
+	USceneComponent* Joint = CreateDefaultSubobject<USceneComponent>(Name);
+	Joint->SetupAttachment(Parent);
+	Joint->SetRelativeLocation(Offset);
+	Joint->SetRelativeRotation(Rotation);
+	return Joint;
+}
+
+UStaticMeshComponent* AVantageCharacter::AddBone(const TCHAR* Name, USceneComponent* Joint, const FVector& HalfExtent, const FVector& Offset)
+{
+	// Hung so its top edge sits on the joint's origin. That is what makes the
+	// joint rotate the bone about its end rather than about its middle.
+	return AddBodyPart(Name, Joint, Offset + FVector(0.f, 0.f, -HalfExtent.Z), HalfExtent, FRotator::ZeroRotator);
 }
 
 UStaticMeshComponent* AVantageCharacter::AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation)
@@ -142,8 +192,7 @@ UStaticMeshComponent* AVantageCharacter::AddBodyPart(const TCHAR* Name, USceneCo
 		Part->SetStaticMesh(CubeFinder.Object);
 	}
 
-	// The player's own geometry must never block his own shot, and the capsule
-	// already handles bumping into things.
+	// His own geometry must never block his own shot; the capsule handles bumping.
 	Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	return Part;
@@ -161,8 +210,6 @@ void AVantageCharacter::BeginPlay()
 
 	Health = MaxHealth;
 
-	// Constructor-time tinting would apply to the class default object, so the
-	// dynamic material instances are made here instead.
 	auto Tint = [](UStaticMeshComponent* Part, const FLinearColor& Colour)
 	{
 		if (!Part)
@@ -175,8 +222,6 @@ void AVantageCharacter::BeginPlay()
 		}
 	};
 
-	Tint(LeftLeg, TrouserColour);
-	Tint(RightLeg, TrouserColour);
 	Tint(Torso, ShirtColour);
 	Tint(Coat, CoatColour);
 	Tint(Head, SkinColour);
@@ -184,8 +229,23 @@ void AVantageCharacter::BeginPlay()
 	Tint(Beard, HairColour);
 	Tint(BeardTaper, HairColour);
 	Tint(Moustache, HairColour);
-	Tint(GunArm, CoatColour);
-	Tint(FreeArm, CoatColour);
+	Tint(HatBrim, HatColour);
+	Tint(HatCrown, HatColour);
+	Tint(HatBand, BandColour);
+	Tint(Collar, CoatColour);
+	Tint(Belt, LeatherColour);
+	Tint(LeftTail, CoatColour);
+	Tint(RightTail, CoatColour);
+	Tint(LeftThigh, TrouserColour);
+	Tint(RightThigh, TrouserColour);
+	Tint(LeftShin, TrouserColour);
+	Tint(RightShin, TrouserColour);
+	Tint(LeftFoot, BootColour);
+	Tint(RightFoot, BootColour);
+	Tint(GunUpperArm, CoatColour);
+	Tint(GunForearm, SkinColour);
+	Tint(FreeUpperArm, CoatColour);
+	Tint(FreeForearm, SkinColour);
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
@@ -196,14 +256,21 @@ void AVantageCharacter::BeginPlay()
 	{
 		Revolver->AttachToComponent(GunHand, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		Revolver->SetActorRelativeLocation(FVector::ZeroVector);
-		Revolver->SetActorRelativeRotation(FRotator::ZeroRotator);
-		// Held at arm's length now rather than at the near plane, so it can be
-		// seen properly and wants to be a little larger than life.
-		Revolver->SetActorRelativeScale3D(FVector(1.35f));
+		// The hand hangs down the arm's local -Z, so the gun needs pitching back
+		// up to point along the arm rather than at the ground.
+		Revolver->SetActorRelativeRotation(FRotator(90.f, 0.f, 0.f));
+		Revolver->SetActorRelativeScale3D(FVector(1.3f));
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("Vantage: revolver failed to spawn; the player is unarmed."));
+	}
+
+	Dog = GetWorld()->SpawnActor<ARobotDog>(
+		GetActorLocation() + FVector(-90.f, 70.f, -40.f), GetActorRotation(), SpawnParams);
+	if (!Dog)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Vantage: robot dog failed to spawn."));
 	}
 
 	GetWorldTimerManager().SetTimer(FallCheckTimer, this, &AVantageCharacter::CheckForFall, 0.5f, true);
@@ -217,6 +284,24 @@ void AVantageCharacter::Tick(float DeltaSeconds)
 	DamageFlash = FMath::Max(DamageFlash - DeltaSeconds * 1.6f, 0.f);
 	HitMarker = FMath::Max(HitMarker - DeltaSeconds * 3.2f, 0.f);
 
+	// Sprint only reads as sprinting when he is actually moving, so holding
+	// shift while stood still does not widen the lens.
+	const bool bReallySprinting = bSprinting && !bDown && !ActiveLock && GetVelocity().Size2D() > WalkSpeed * 0.6f;
+	SprintBlend = FMath::FInterpTo(SprintBlend, bReallySprinting ? 1.f : 0.f, DeltaSeconds, 5.f);
+
+	if (Camera)
+	{
+		const float TargetFOV = FMath::Lerp(BaseFieldOfView, SprintFieldOfView, SprintBlend);
+		Camera->SetFieldOfView(FMath::FInterpTo(Camera->FieldOfView, TargetFOV, DeltaSeconds, 6.f));
+	}
+
+	// Drop the lock if he wanders out of reach of it.
+	if (ActiveLock && FVector::Dist(GetActorLocation(), ActiveLock->GetActorLocation()) > UseRange * 1.6f)
+	{
+		ActiveLock->Disengage();
+		ActiveLock = nullptr;
+	}
+
 	UpdateBody(DeltaSeconds);
 
 	if (bDown)
@@ -224,7 +309,6 @@ void AVantageCharacter::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Regenerate only after a clear spell, so a fight still has a cost.
 	TimeSinceDamage += DeltaSeconds;
 	if (TimeSinceDamage > RegenDelay && Health < MaxHealth)
 	{
@@ -236,38 +320,64 @@ void AVantageCharacter::UpdateBody(float DeltaSeconds)
 {
 	if (bDown)
 	{
-		// Slump forward and stay there until Revive puts him back.
 		const FRotator Slumped(78.f, 0.f, 12.f);
 		BodyRoot->SetRelativeRotation(FMath::RInterpTo(BodyRoot->GetRelativeRotation(), Slumped, DeltaSeconds, 5.f));
 		BodyRoot->SetRelativeLocation(FMath::VInterpTo(BodyRoot->GetRelativeLocation(), FVector(20.f, 0.f, -46.f), DeltaSeconds, 5.f));
 		return;
 	}
 
-	BodyRoot->SetRelativeRotation(FRotator::ZeroRotator);
-
-	// One phase drives the whole walk: legs opposed, free arm counter-swinging,
-	// and a bob at twice the rate so both footfalls read.
 	const float Speed = GetVelocity().Size2D();
-	const float Target = FMath::Clamp(Speed / FMath::Max(WalkSpeed, 1.f), 0.f, 1.7f);
+	const float Target = FMath::Clamp(Speed / FMath::Max(WalkSpeed, 1.f), 0.f, 1.8f);
 	GaitBlend = FMath::FInterpTo(GaitBlend, Target, DeltaSeconds, 7.f);
-	GaitPhase += DeltaSeconds * (5.2f + GaitBlend * 3.4f);
+	GaitPhase += DeltaSeconds * (5.2f + GaitBlend * 3.4f + SprintBlend * 3.f);
 
 	const float Swing = FMath::Sin(GaitPhase) * GaitBlend;
+	const float Stride = 30.f + 15.f * SprintBlend;
 
-	if (LeftLeg && RightLeg)
+	// Hips lead, opposed. A positive pitch swings a hanging bone backwards.
+	if (LeftHip && RightHip)
 	{
-		LeftLeg->SetRelativeRotation(FRotator(Swing * 34.f, 0.f, 0.f));
-		RightLeg->SetRelativeRotation(FRotator(-Swing * 34.f, 0.f, 0.f));
+		LeftHip->SetRelativeRotation(FRotator(Swing * Stride, 0.f, 0.f));
+		RightHip->SetRelativeRotation(FRotator(-Swing * Stride, 0.f, 0.f));
 	}
 
-	if (FreeArm)
+	// Knees only ever bend one way, and only on the recovery half of the stride -
+	// clamping at zero is what stops the shin hinging forwards through the thigh.
+	const float KneeMax = 46.f + 26.f * SprintBlend;
+	const float LeftBend  = FMath::Max(0.f, -FMath::Sin(GaitPhase - 0.7f)) * KneeMax * GaitBlend;
+	const float RightBend = FMath::Max(0.f, -FMath::Sin(GaitPhase - 0.7f + PI)) * KneeMax * GaitBlend;
+
+	if (LeftKnee && RightKnee)
 	{
-		FreeArm->SetRelativeRotation(FRotator(8.f - Swing * 22.f, 0.f, 0.f));
+		LeftKnee->SetRelativeRotation(FRotator(LeftBend, 0.f, 0.f));
+		RightKnee->SetRelativeRotation(FRotator(RightBend, 0.f, 0.f));
 	}
 
+	// Boots counter the accumulated hip and knee angle so they stay near flat.
+	if (LeftFoot && RightFoot)
+	{
+		LeftFoot->SetRelativeRotation(FRotator(-(Swing * Stride + LeftBend) * 0.65f, 0.f, 0.f));
+		RightFoot->SetRelativeRotation(FRotator(-(-Swing * Stride + RightBend) * 0.65f, 0.f, 0.f));
+	}
+
+	// Free arm counter-swings the legs and pumps harder at a sprint.
+	if (FreeShoulder && FreeElbow)
+	{
+		FreeShoulder->SetRelativeRotation(FRotator(-6.f - Swing * (24.f + 14.f * SprintBlend), 0.f, 0.f));
+		FreeElbow->SetRelativeRotation(FRotator(10.f + FMath::Max(0.f, Swing) * (38.f + 30.f * SprintBlend), 0.f, 0.f));
+	}
+
+	// Gun arm stays on target; it only breathes with the stride.
+	if (GunShoulder && GunElbow)
+	{
+		GunShoulder->SetRelativeRotation(FRotator(GunShoulderRest + Swing * 3.f, 0.f, 0.f));
+		GunElbow->SetRelativeRotation(FRotator(12.f + Swing * 5.f, 0.f, 0.f));
+	}
+
+	// Lean into the run, and bob at twice the stride so both footfalls read.
+	BodyRoot->SetRelativeRotation(FRotator(SprintBlend * 7.f, 0.f, 0.f));
 	BodyRoot->SetRelativeLocation(FVector(0.f, 0.f, FMath::Abs(FMath::Sin(GaitPhase)) * 2.6f * GaitBlend));
 
-	// The arm and gun follow the camera's pitch, so he aims where you look.
 	if (AimPivot && Controller)
 	{
 		const float AimPitch = FRotator::NormalizeAxis(Controller->GetControlRotation().Pitch);
@@ -300,6 +410,11 @@ void AVantageCharacter::BuildInputBindings()
 	FireAction       = MakeAction(TEXT("IA_Fire"),       EInputActionValueType::Boolean);
 	ReloadAction     = MakeAction(TEXT("IA_Reload"),     EInputActionValueType::Boolean);
 	FlashlightAction = MakeAction(TEXT("IA_Flashlight"), EInputActionValueType::Boolean);
+	UseAction        = MakeAction(TEXT("IA_Use"),        EInputActionValueType::Boolean);
+	DialUpAction     = MakeAction(TEXT("IA_DialUp"),     EInputActionValueType::Boolean);
+	DialDownAction   = MakeAction(TEXT("IA_DialDown"),   EInputActionValueType::Boolean);
+	DialLeftAction   = MakeAction(TEXT("IA_DialLeft"),   EInputActionValueType::Boolean);
+	DialRightAction  = MakeAction(TEXT("IA_DialRight"),  EInputActionValueType::Boolean);
 
 	// A key press lands on the X axis, so anything that should read as
 	// forward/back needs swizzling into Y first, then negating if it points the
@@ -330,8 +445,6 @@ void AVantageCharacter::BuildInputBindings()
 	MapAxis(MoveAction, EKeys::Gamepad_LeftX, false, false);
 	MapAxis(MoveAction, EKeys::Gamepad_LeftY, true,  false);
 
-	// Mouse deltas are already frame independent; stick deflection is not, so it
-	// gets its own action that LookRate scales by delta time.
 	InputContext->MapKey(LookAction, EKeys::Mouse2D);
 	MapAxis(LookRateAction, EKeys::Gamepad_RightX, false, false);
 	MapAxis(LookRateAction, EKeys::Gamepad_RightY, true,  false);
@@ -339,16 +452,29 @@ void AVantageCharacter::BuildInputBindings()
 	InputContext->MapKey(JumpAction, EKeys::SpaceBar);
 	InputContext->MapKey(JumpAction, EKeys::Gamepad_FaceButton_Bottom);
 	InputContext->MapKey(SprintAction, EKeys::LeftShift);
-	InputContext->MapKey(SprintAction, EKeys::Gamepad_LeftThumbstick);
+	InputContext->MapKey(SprintAction, EKeys::Gamepad_LeftShoulder);
 	InputContext->MapKey(CrouchAction, EKeys::LeftControl);
 	InputContext->MapKey(CrouchAction, EKeys::C);
 	InputContext->MapKey(CrouchAction, EKeys::Gamepad_FaceButton_Right);
 	InputContext->MapKey(FireAction, EKeys::LeftMouseButton);
 	InputContext->MapKey(FireAction, EKeys::Gamepad_RightTrigger);
 	InputContext->MapKey(ReloadAction, EKeys::R);
-	InputContext->MapKey(ReloadAction, EKeys::Gamepad_FaceButton_Left);
 	InputContext->MapKey(FlashlightAction, EKeys::F);
 	InputContext->MapKey(FlashlightAction, EKeys::Gamepad_FaceButton_Top);
+	InputContext->MapKey(UseAction, EKeys::E);
+	InputContext->MapKey(UseAction, EKeys::Gamepad_FaceButton_Left);
+
+	// The dial keys double as the movement keys. Enhanced Input is happy to fire
+	// both; the handlers below do nothing unless a lock is actually open, and
+	// Move() bails out while one is.
+	InputContext->MapKey(DialUpAction, EKeys::W);
+	InputContext->MapKey(DialUpAction, EKeys::Up);
+	InputContext->MapKey(DialDownAction, EKeys::S);
+	InputContext->MapKey(DialDownAction, EKeys::Down);
+	InputContext->MapKey(DialLeftAction, EKeys::A);
+	InputContext->MapKey(DialLeftAction, EKeys::Left);
+	InputContext->MapKey(DialRightAction, EKeys::D);
+	InputContext->MapKey(DialRightAction, EKeys::Right);
 }
 
 void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -357,9 +483,6 @@ void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 	BuildInputBindings();
 
-	// Two things can fail here, and both fail silently by default, so each one
-	// gets its own error. Between them they cover every "nothing responds to the
-	// keyboard" case short of the plugin being disabled outright.
 	const APlayerController* PC = Cast<APlayerController>(GetController());
 	UEnhancedInputLocalPlayerSubsystem* Subsystem = PC
 		? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer())
@@ -396,6 +519,11 @@ void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	Input->BindAction(FireAction, ETriggerEvent::Started, this, &AVantageCharacter::FireWeapon);
 	Input->BindAction(ReloadAction, ETriggerEvent::Started, this, &AVantageCharacter::ReloadWeapon);
 	Input->BindAction(FlashlightAction, ETriggerEvent::Started, this, &AVantageCharacter::ToggleFlashlight);
+	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AVantageCharacter::UseOrConfirm);
+	Input->BindAction(DialUpAction, ETriggerEvent::Started, this, &AVantageCharacter::DialUp);
+	Input->BindAction(DialDownAction, ETriggerEvent::Started, this, &AVantageCharacter::DialDown);
+	Input->BindAction(DialLeftAction, ETriggerEvent::Started, this, &AVantageCharacter::DialLeft);
+	Input->BindAction(DialRightAction, ETriggerEvent::Started, this, &AVantageCharacter::DialRight);
 }
 
 void AVantageCharacter::Move(const FInputActionValue& Value)
@@ -403,12 +531,11 @@ void AVantageCharacter::Move(const FInputActionValue& Value)
 	bReceivedAnyInput = true;
 
 	const FVector2D Axis = Value.Get<FVector2D>();
-	if (!Controller || bDown || Axis.IsNearlyZero())
+	if (!Controller || bDown || ActiveLock || Axis.IsNearlyZero())
 	{
 		return;
 	}
 
-	// Movement is flattened to the yaw plane so looking up does not slow you down.
 	const FRotator YawOnly(0.f, Controller->GetControlRotation().Yaw, 0.f);
 	const FRotationMatrix YawFrame(YawOnly);
 
@@ -420,6 +547,11 @@ void AVantageCharacter::Look(const FInputActionValue& Value)
 {
 	bReceivedAnyInput = true;
 
+	if (ActiveLock)
+	{
+		return;
+	}
+
 	const FVector2D Axis = Value.Get<FVector2D>();
 	AddControllerYawInput(Axis.X * MouseSensitivity);
 	AddControllerPitchInput(-Axis.Y * MouseSensitivity);
@@ -427,6 +559,11 @@ void AVantageCharacter::Look(const FInputActionValue& Value)
 
 void AVantageCharacter::LookRate(const FInputActionValue& Value)
 {
+	if (ActiveLock)
+	{
+		return;
+	}
+
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const float Delta = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f;
 
@@ -436,16 +573,23 @@ void AVantageCharacter::LookRate(const FInputActionValue& Value)
 
 void AVantageCharacter::StartSprint()
 {
+	bSprinting = true;
 	GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
 }
 
 void AVantageCharacter::StopSprint()
 {
+	bSprinting = false;
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
 void AVantageCharacter::ToggleCrouch()
 {
+	if (ActiveLock)
+	{
+		return;
+	}
+
 	if (bIsCrouched)
 	{
 		UnCrouch();
@@ -464,18 +608,104 @@ void AVantageCharacter::ToggleFlashlight()
 	}
 }
 
+// ---------------------------------------------------------------------------
+// the lock
+// ---------------------------------------------------------------------------
+
+ACodeLock* AVantageCharacter::FindLockInReach() const
+{
+	ACodeLock* Best = nullptr;
+	float BestDistanceSquared = UseRange * UseRange;
+
+	for (TActorIterator<ACodeLock> It(GetWorld()); It; ++It)
+	{
+		const float DistanceSquared = FVector::DistSquared(GetActorLocation(), It->GetActorLocation());
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			Best = *It;
+		}
+	}
+
+	return Best;
+}
+
+FText AVantageCharacter::GetReachPrompt() const
+{
+	if (ActiveLock)
+	{
+		return FText::GetEmpty();
+	}
+
+	if (const ACodeLock* Lock = FindLockInReach())
+	{
+		return Lock->IsOpen()
+			? FText::FromString(TEXT("Unlocked"))
+			: FText::FromString(TEXT("[E]  Work the lock"));
+	}
+
+	return FText::GetEmpty();
+}
+
+void AVantageCharacter::UseOrConfirm()
+{
+	bReceivedAnyInput = true;
+
+	if (bDown)
+	{
+		return;
+	}
+
+	if (ActiveLock)
+	{
+		if (ActiveLock->Submit())
+		{
+			// Solved. Step back automatically rather than leaving him staring
+			// at an open lock with the controls still captured.
+			ActiveLock->Disengage();
+			ActiveLock = nullptr;
+		}
+		return;
+	}
+
+	ACodeLock* Lock = FindLockInReach();
+	if (Lock && !Lock->IsOpen())
+	{
+		ActiveLock = Lock;
+		Lock->Engage();
+		GetCharacterMovement()->StopMovementImmediately();
+	}
+}
+
+void AVantageCharacter::CancelLock()
+{
+	if (ActiveLock)
+	{
+		ActiveLock->Disengage();
+		ActiveLock = nullptr;
+	}
+}
+
+void AVantageCharacter::DialUp()    { if (ActiveLock) { ActiveLock->NudgeDigit(1); } }
+void AVantageCharacter::DialDown()  { if (ActiveLock) { ActiveLock->NudgeDigit(-1); } }
+void AVantageCharacter::DialLeft()  { if (ActiveLock) { ActiveLock->MoveCursor(-1); } }
+void AVantageCharacter::DialRight() { if (ActiveLock) { ActiveLock->MoveCursor(1); } }
+
+// ---------------------------------------------------------------------------
+// shooting
+// ---------------------------------------------------------------------------
+
 void AVantageCharacter::FireWeapon()
 {
 	bReceivedAnyInput = true;
 
-	if (bDown || !Revolver)
+	if (bDown || ActiveLock || !Revolver)
 	{
 		return;
 	}
 
 	if (!Revolver->Fire())
 	{
-		// Dry click on an empty gun starts the reload rather than doing nothing.
 		if (Revolver->IsEmpty())
 		{
 			Revolver->BeginReload();
@@ -495,9 +725,6 @@ void AVantageCharacter::ResolveShot()
 		return;
 	}
 
-	// Trace from the view point, not the muzzle. In third person the camera sits
-	// behind and right of him, so this is what puts the round under the
-	// crosshair rather than wherever the barrel happens to be pointing.
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	PC->GetPlayerViewPoint(ViewLocation, ViewRotation);
@@ -507,6 +734,10 @@ void AVantageCharacter::ResolveShot()
 	if (Revolver)
 	{
 		Params.AddIgnoredActor(Revolver);
+	}
+	if (Dog)
+	{
+		Params.AddIgnoredActor(Dog);
 	}
 
 	FHitResult Hit;
@@ -539,11 +770,22 @@ void AVantageCharacter::ReloadWeapon()
 {
 	bReceivedAnyInput = true;
 
+	// Doubles as the way out of a lock, which is why it checks that first.
+	if (ActiveLock)
+	{
+		CancelLock();
+		return;
+	}
+
 	if (!bDown && Revolver)
 	{
 		Revolver->BeginReload();
 	}
 }
+
+// ---------------------------------------------------------------------------
+// damage
+// ---------------------------------------------------------------------------
 
 void AVantageCharacter::TakeZombieHit(float Damage)
 {
@@ -555,6 +797,9 @@ void AVantageCharacter::TakeZombieHit(float Damage)
 	Health = FMath::Max(Health - Damage, 0.f);
 	TimeSinceDamage = 0.f;
 	DamageFlash = 1.f;
+
+	// Being mauled is not the moment to be fiddling with a combination.
+	CancelLock();
 
 	if (Health <= 0.f)
 	{
@@ -575,12 +820,17 @@ void AVantageCharacter::Revive(const FVector& At)
 	TimeSinceDamage = 0.f;
 	DamageFlash = 0.f;
 
+	CancelLock();
 	GetCharacterMovement()->StopMovementImmediately();
 	SetActorLocation(At, false, nullptr, ETeleportType::TeleportPhysics);
 
 	if (Revolver)
 	{
 		Revolver->BeginReload();
+	}
+	if (Dog)
+	{
+		Dog->SetActorLocation(At + FVector(-90.f, 70.f, 0.f), false, nullptr, ETeleportType::TeleportPhysics);
 	}
 }
 
@@ -591,15 +841,14 @@ void AVantageCharacter::CheckForFall()
 		return;
 	}
 
-	FVector Recovery(0.f, 0.f, 140.f);
+	FVector Recovery(0.f, -230.f, 140.f);
 	if (const AVantageGameMode* GameMode = GetWorld()->GetAuthGameMode<AVantageGameMode>())
 	{
 		Recovery = GameMode->GetSpawnLocation();
 	}
 
 	UE_LOG(LogTemp, Warning,
-		TEXT("Vantage: player fell out of the level and was returned to %s. ")
-		TEXT("If this repeats immediately, the ground is not being built."),
+		TEXT("Vantage: player fell out of the level and was returned to %s."),
 		*Recovery.ToCompactString());
 
 	GetCharacterMovement()->StopMovementImmediately();

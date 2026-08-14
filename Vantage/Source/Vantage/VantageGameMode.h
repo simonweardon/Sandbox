@@ -65,6 +65,14 @@ public:
 	/** Called by AObjectiveCache when the player walks into it. */
 	void NotifyCacheTaken();
 
+	/** Called by ACodeLock when the right combination goes in. */
+	void NotifyLockOpened();
+
+	bool IsLockOpen() const { return bLockOpen; }
+
+	/** The four digits this run wants. Stencilled on the plaque downstairs. */
+	const TArray<int32>& GetCombination() const { return Combination; }
+
 	EVantageObjective GetObjective() const { return Objective; }
 	bool IsCarryingCache() const { return Objective == EVantageObjective::ReturnToExtraction; }
 
@@ -92,6 +100,12 @@ private:
 
 	void RestartRun();
 
+	/** Rolls a fresh combination and hands it to the lock. */
+	void ArmLock();
+
+	/** True once he is close enough that the lock, not the door, is the target. */
+	bool IsPlayerNearVault() const;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage")
 	float IntermissionSeconds = 6.f;
 
@@ -117,7 +131,13 @@ private:
 	FTimerHandle RestartTimer;
 	FTimerHandle ExtractionTimer;
 
+	UPROPERTY(Transient)
+	TObjectPtr<class ACodeLock> Lock;
+
+	TArray<int32> Combination;
+
 	EVantageObjective Objective = EVantageObjective::FetchCache;
+	bool bLockOpen = false;
 	bool bLevelBuilt = false;
 	bool bBetweenWaves = false;
 	bool bPlayerDown = false;

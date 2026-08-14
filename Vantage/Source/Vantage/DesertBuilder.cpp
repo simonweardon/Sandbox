@@ -18,12 +18,12 @@ namespace
 
 	const FLinearColor SandColour     (0.560f, 0.440f, 0.290f);
 	const FLinearColor SandDarkColour (0.410f, 0.310f, 0.195f);
-	const FLinearColor ConcreteColour (0.440f, 0.420f, 0.380f);
-	const FLinearColor ConcreteDark   (0.270f, 0.260f, 0.235f);
+	const FLinearColor ConcreteColour (0.415f, 0.420f, 0.430f);
+	const FLinearColor ConcreteDark   (0.235f, 0.240f, 0.250f);
 	const FLinearColor GlassColour    (0.055f, 0.075f, 0.095f);
 	const FLinearColor RustColour     (0.330f, 0.170f, 0.095f);
 	const FLinearColor SteelColour    (0.230f, 0.235f, 0.250f);
-	const FLinearColor DistantColour  (0.330f, 0.300f, 0.300f);
+	const FLinearColor DistantColour  (0.310f, 0.315f, 0.335f);
 }
 
 ADesertBuilder::ADesertBuilder()
@@ -74,7 +74,20 @@ UStaticMeshComponent* ADesertBuilder::AddShape(
 
 	if (UMaterialInstanceDynamic* Material = Shape->CreateAndSetMaterialInstanceDynamic(0))
 	{
-		Material->SetVectorParameterValue(TEXT("Color"), Colour);
+		// Every surface gets a small deterministic shade offset keyed off where
+		// it sits. Without it a wall of identically tinted boxes reads as one
+		// flat sheet; with it the panelling and blockwork start to show.
+		const FIntVector Cell(
+			FMath::FloorToInt(Centre.X / 12.f),
+			FMath::FloorToInt(Centre.Y / 12.f),
+			FMath::FloorToInt(Centre.Z / 12.f));
+
+		FRandomStream Jitter(static_cast<int32>(GetTypeHash(Cell)));
+		const float Shade = Jitter.FRandRange(0.84f, 1.16f);
+
+		FLinearColor Weathered = Colour * Shade;
+		Weathered.A = 1.f;
+		Material->SetVectorParameterValue(TEXT("Color"), Weathered);
 	}
 
 	BuiltComponents.Add(Shape);
@@ -473,19 +486,20 @@ void ADesertBuilder::BuildCover()
 
 // Placed due north and well past the ring the horde spawns on, so the walk to
 // it goes straight through them rather than around.
-const FVector ADesertBuilder::CacheLocation(0.f, 4780.f, 0.f);
+const FVector ADesertBuilder::CacheLocation(0.f, 4860.f, 380.f);
+const FVector ADesertBuilder::LockLocation(0.f, 4700.f, 380.f);
+const FVector ADesertBuilder::PlaqueLocation(-450.f, 4480.f, 150.f);
 const FVector ADesertBuilder::VaultDoorLocation(0.f, 4180.f, 0.f);
 const FVector ADesertBuilder::ExtractionLocation(0.f, 0.f, 0.f);
 
 void ADesertBuilder::BuildVaultRuin()
 {
 	const float BaseY = 4600.f;
-
-	// Ground floor: a hollow room 900 x 700 with a doorway on the south face.
-	const float RoomHeight = 340.f;
 	const float WallHalf = 25.f;
 
-	// South wall, split around the doorway at X -125..125.
+	// --- ground floor: a hollow room with a doorway on the south face -------
+	const float RoomHeight = 340.f;
+
 	AddBox(FVector(-300.f, 4250.f, RoomHeight * 0.5f), FVector(175.f, WallHalf, RoomHeight * 0.5f), ConcreteColour);
 	AddBox(FVector(300.f, 4250.f, RoomHeight * 0.5f),  FVector(175.f, WallHalf, RoomHeight * 0.5f), ConcreteColour);
 	AddBox(FVector(0.f, 4250.f, 320.f), FVector(125.f, WallHalf, 20.f), ConcreteColour);
@@ -495,7 +509,6 @@ void ADesertBuilder::BuildVaultRuin()
 	AddBox(FVector(475.f, BaseY, RoomHeight * 0.5f),  FVector(WallHalf, 375.f, RoomHeight * 0.5f), ConcreteColour);
 
 	AddBox(FVector(0.f, BaseY, 5.f), FVector(475.f, 375.f, 5.f), ConcreteDark, false);
-	AddBox(FVector(0.f, BaseY, 360.f), FVector(500.f, 400.f, 20.f), ConcreteDark);
 
 	// Doorway surround, lit, so the entrance reads from across the sand.
 	AddBox(FVector(-137.f, 4250.f, 150.f), FVector(12.f, 30.f, 150.f), SteelColour, false);
@@ -503,14 +516,76 @@ void ADesertBuilder::BuildVaultRuin()
 	AddBox(FVector(0.f, 4250.f, 296.f),    FVector(137.f, 30.f, 10.f), SteelColour, false);
 
 	AddLight(FVector(0.f, 4180.f, 250.f), FLinearColor(0.35f, 0.85f, 1.f), 5000.f, 900.f);
+	AddLight(FVector(-220.f, 4450.f, 300.f), FLinearColor(1.f, 0.86f, 0.68f), 2800.f, 850.f);
 
-	// Interior lighting: dim, so the cache's own glow is what draws you in.
-	AddLight(FVector(-200.f, 4500.f, 300.f), FLinearColor(1.f, 0.86f, 0.68f), 2600.f, 800.f);
-	AddLight(FVector(220.f, 4800.f, 300.f),  FLinearColor(1.f, 0.86f, 0.68f), 2200.f, 800.f);
+	// --- the plaque carrying this run\'s combination -------------------------
+	// Set into the west wall where the torch beam catches it on the way in.
+	AddBox(PlaqueLocation + FVector(14.f, 0.f, 0.f), FVector(4.f, 78.f, 52.f), SteelColour, false);
+	AddBox(PlaqueLocation + FVector(19.f, 0.f, 0.f), FVector(2.f, 68.f, 42.f), ConcreteDark, false);
+	AddLight(PlaqueLocation + FVector(90.f, 0.f, 60.f), FLinearColor(1.f, 0.92f, 0.75f), 1500.f, 460.f);
 
-	// The tower above the room, so it reads as a skyscraper rather than a shed.
-	const float ShaftBase = 380.f;
-	const float ShaftTop = 2080.f;
+	// --- staircase up the east side -----------------------------------------
+	// Seventeen 22cm treads. Each is a solid block from the floor rather than a
+	// floating slab, so there is nothing to fall through underneath.
+	const int32 StepCount = 17;
+	const float StepRise = 380.f / StepCount;
+	const float StepTread = 31.f;
+	const float StairStartY = 4350.f;
+
+	for (int32 Index = 0; Index < StepCount; ++Index)
+	{
+		const float TopZ = (Index + 1) * StepRise;
+		AddBox(
+			FVector(340.f, StairStartY + Index * StepTread + StepTread * 0.5f, TopZ * 0.5f),
+			FVector(90.f, StepTread * 0.5f, TopZ * 0.5f),
+			ConcreteDark);
+	}
+
+	// Handrail alongside the flight, so the climb reads as a stair not a ramp.
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		const float T = Index / 4.f;
+		AddBox(
+			FVector(246.f, StairStartY + T * (StepCount * StepTread), 380.f * T + 55.f),
+			FVector(5.f, 5.f, 55.f),
+			SteelColour, false);
+	}
+
+	AddLight(FVector(300.f, 4600.f, 300.f), FLinearColor(1.f, 0.86f, 0.68f), 2400.f, 800.f);
+
+	// --- first floor slab, with the stairwell left open ---------------------
+	// Four pieces around a hole at X 240..440, Y 4760..4940.
+	AddBox(FVector(-130.f, BaseY, 360.f), FVector(370.f, 400.f, 20.f), ConcreteDark);
+	AddBox(FVector(470.f, BaseY, 360.f),  FVector(30.f, 400.f, 20.f),  ConcreteDark);
+	AddBox(FVector(340.f, 4480.f, 360.f), FVector(100.f, 280.f, 20.f), ConcreteDark);
+	AddBox(FVector(340.f, 4970.f, 360.f), FVector(100.f, 30.f, 20.f),  ConcreteDark);
+
+	// A lip around the opening, so you can see where the floor stops.
+	AddBox(FVector(235.f, 4850.f, 392.f), FVector(6.f, 90.f, 12.f), SteelColour, false);
+	AddBox(FVector(340.f, 4755.f, 392.f), FVector(100.f, 6.f, 12.f), SteelColour, false);
+
+	// --- first floor room ---------------------------------------------------
+	const float UpperMid = 550.f;
+	const float UpperHalf = 170.f;
+
+	AddBox(FVector(0.f, 4250.f, UpperMid),  FVector(475.f, WallHalf, UpperHalf), ConcreteColour);
+	AddBox(FVector(0.f, 4950.f, UpperMid),  FVector(475.f, WallHalf, UpperHalf), ConcreteColour);
+	AddBox(FVector(-475.f, BaseY, UpperMid), FVector(WallHalf, 375.f, UpperHalf), ConcreteColour);
+	AddBox(FVector(475.f, BaseY, UpperMid),  FVector(WallHalf, 375.f, UpperHalf), ConcreteColour);
+	AddBox(FVector(0.f, BaseY, 740.f), FVector(500.f, 400.f, 20.f), ConcreteDark);
+
+	// A blown-out section of the south wall, so the room is lit and you can see
+	// the desert - and the horde - from up here.
+	AddBox(FVector(-250.f, 4250.f, 620.f), FVector(150.f, 30.f, 70.f), ConcreteDark, false);
+	AddLight(FVector(-200.f, 4400.f, 660.f), FLinearColor(0.85f, 0.90f, 1.f), 3400.f, 900.f);
+	AddLight(FVector(0.f, 4800.f, 660.f), FLinearColor(1.f, 0.86f, 0.68f), 3000.f, 900.f);
+
+	// Plinth under the cache, at the far end behind the lock.
+	AddBox(FVector(0.f, 4860.f, 400.f), FVector(70.f, 70.f, 20.f), SteelColour);
+
+	// --- the tower above ----------------------------------------------------
+	const float ShaftBase = 760.f;
+	const float ShaftTop = 2360.f;
 	AddBox(FVector(0.f, BaseY, (ShaftBase + ShaftTop) * 0.5f), FVector(430.f, 340.f, (ShaftTop - ShaftBase) * 0.5f), ConcreteColour);
 
 	const float GlazeZ = (ShaftBase + ShaftTop) * 0.5f;
@@ -526,7 +601,6 @@ void ADesertBuilder::BuildVaultRuin()
 		AddBox(FVector(0.f, BaseY, Z), FVector(450.f, 358.f, 12.f), ConcreteDark, false);
 	}
 
-	// Broken crown.
 	AddBox(FVector(-70.f, BaseY + 50.f, ShaftTop + 110.f), FVector(320.f, 250.f, 110.f), ConcreteColour);
 	AddBox(FVector(60.f, BaseY - 40.f, ShaftTop + 300.f),  FVector(190.f, 150.f, 90.f),  ConcreteColour);
 	AddBox(FVector(-30.f, BaseY + 20.f, ShaftTop + 430.f), FVector(90.f, 80.f, 50.f),    ConcreteColour);

@@ -35,6 +35,18 @@ private:
 	 * there is nothing to steer by.
 	 */
 	void DrawObjectiveMarker(const AVantageGameMode* GameMode, const AVantageCharacter* Player);
+
+	/** Four dials, drawn only while he is stood at the lock. */
+	void DrawLockPanel(const AVantageCharacter* Player);
+
+	/** The combination, readable off the plaque when he is stood at it. */
+	void DrawPlaque(const AVantageGameMode* GameMode, const AVantageCharacter* Player);
+
+	/** What the dog is doing, and whether it is rebooting. */
+	void DrawDogStatus(const AVantageCharacter* Player);
+
+	/** "[E] Work the lock" and friends. */
+	void DrawReachPrompt(const AVantageCharacter* Player);
 	void DrawDamageVignette(float Strength);
 	void DrawDownBanner();
 

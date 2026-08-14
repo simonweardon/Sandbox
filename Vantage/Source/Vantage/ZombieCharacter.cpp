@@ -1,5 +1,6 @@
 #include "ZombieCharacter.h"
 
+#include "RobotDog.h"
 #include "VantageCharacter.h"
 #include "VantageGameMode.h"
 
@@ -195,6 +196,20 @@ void AZombieCharacter::ChasePlayer(float DeltaSeconds)
 
 		// Lunge, so a hit is visible as well as felt.
 		AttackLunge = 1.f;
+		return;
+	}
+
+	// The dog gets swatted if it is the thing in reach. It is not a priority
+	// target - they only ever walk at the player - but biting has a cost.
+	if (ARobotDog* Dog = Player->GetDog())
+	{
+		if (!Dog->IsRebooting() && AttackCooldown <= 0.f &&
+			FVector::DistSquared2D(GetActorLocation(), Dog->GetActorLocation()) <= FMath::Square(AttackRange))
+		{
+			AttackCooldown = AttackInterval;
+			AttackLunge = 1.f;
+			Dog->TakeZombieHit(TouchDamage * 1.4f);
+		}
 	}
 }
 

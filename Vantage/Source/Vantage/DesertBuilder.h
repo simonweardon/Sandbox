@@ -29,8 +29,14 @@ public:
 	/** Half width of the area zombies are allowed to spawn in. */
 	static constexpr float ArenaRadius = 3200.f;
 
-	/** The cache sits at the back of the vault ruin, well beyond the horde. */
+	/** The cache sits on the upper floor of the vault ruin, behind the lock. */
 	static const FVector CacheLocation;
+
+	/** The combination lock guarding it, on the same floor. */
+	static const FVector LockLocation;
+
+	/** Plaque downstairs carrying the combination for this run. */
+	static const FVector PlaqueLocation;
 
 	/** Ground floor of the vault ruin, for the HUD to point at. */
 	static const FVector VaultDoorLocation;

@@ -1,5 +1,6 @@
 #include "VantageGameMode.h"
 
+#include "CodeLock.h"
 #include "DesertBuilder.h"
 #include "ObjectiveCache.h"
 #include "VantageCharacter.h"
@@ -81,15 +82,74 @@ void AVantageGameMode::EnsureLevelBuilt()
 	// the spawn point does not depend on actor iteration order.
 	SpawnPoint = World->SpawnActor<APlayerStart>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
 
-	World->SpawnActor<AObjectiveCache>(ADesertBuilder::CacheLocation, FRotator::ZeroRotator, SpawnParams);
+	// Facing back down the room toward the stairs, so you meet it head on.
+	Lock = World->SpawnActor<ACodeLock>(ADesertBuilder::LockLocation, FRotator(0.f, 90.f, 0.f), SpawnParams);
+	ArmLock();
 
 	// Cheap poll rather than a per-frame check on the character: extraction only
 	// matters once, and a third of a second is well inside human reaction time.
 	GetWorldTimerManager().SetTimer(
 		ExtractionTimer, this, &AVantageGameMode::CheckExtraction, 0.33f, true);
 
-	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s, cache at %s."),
-		*SpawnLocation.ToCompactString(), *ADesertBuilder::CacheLocation.ToCompactString());
+	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s, lock at %s."),
+		*SpawnLocation.ToCompactString(), *ADesertBuilder::LockLocation.ToCompactString());
+}
+
+void AVantageGameMode::ArmLock()
+{
+	// Fresh digits every run, so the combination cannot be memorised between
+	// attempts and the plaque is worth walking to.
+	Combination.Reset();
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		Combination.Add(FMath::RandRange(0, 9));
+	}
+
+	bLockOpen = false;
+
+	if (Lock)
+	{
+		Lock->SetCombination(Combination);
+	}
+
+	UE_LOG(LogVantage, Log, TEXT("Vault combination for this run: %d%d%d%d"),
+		Combination[0], Combination[1], Combination[2], Combination[3]);
+}
+
+bool AVantageGameMode::IsPlayerNearVault() const
+{
+	const UWorld* World = GetWorld();
+	const APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	const APawn* Player = PC ? PC->GetPawn() : nullptr;
+	if (!Player)
+	{
+		return false;
+	}
+
+	// Generous, because the marker should switch to the lock while he is still
+	// outside rather than the instant he crosses the threshold.
+	return FVector::DistSquared2D(Player->GetActorLocation(), FVector(0.f, 4600.f, 0.f)) < FMath::Square(1100.f);
+}
+
+void AVantageGameMode::NotifyLockOpened()
+{
+	if (bLockOpen)
+	{
+		return;
+	}
+
+	bLockOpen = true;
+
+	// The cache only exists once the lock is off it, which saves having to make
+	// it inert and then un-inert it.
+	if (UWorld* World = GetWorld())
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		World->SpawnActor<AObjectiveCache>(ADesertBuilder::CacheLocation, FRotator::ZeroRotator, SpawnParams);
+	}
+
+	UE_LOG(LogVantage, Log, TEXT("Lock opened on wave %d."), Wave);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +350,9 @@ FText AVantageGameMode::GetObjectiveText() const
 	switch (Objective)
 	{
 	case EVantageObjective::FetchCache:
-		return FText::FromString(TEXT("Reach the vault tower to the north"));
+		return bLockOpen
+			? FText::FromString(TEXT("Take the cache"))
+			: FText::FromString(TEXT("Climb the vault tower and work the lock"));
 
 	case EVantageObjective::ReturnToExtraction:
 		return FText::FromString(TEXT("Carry the cache back to the beacon"));
@@ -305,7 +367,15 @@ FVector AVantageGameMode::GetObjectiveLocation() const
 	switch (Objective)
 	{
 	case EVantageObjective::FetchCache:
-		return ADesertBuilder::VaultDoorLocation + FVector(0.f, 0.f, 260.f);
+		if (bLockOpen)
+		{
+			return ADesertBuilder::CacheLocation + FVector(0.f, 0.f, 90.f);
+		}
+		// Point at the door until he is close enough for the lock upstairs to be
+		// the useful thing to aim at.
+		return IsPlayerNearVault()
+			? ADesertBuilder::LockLocation + FVector(0.f, 0.f, 120.f)
+			: ADesertBuilder::VaultDoorLocation + FVector(0.f, 0.f, 260.f);
 
 	case EVantageObjective::ReturnToExtraction:
 		return ADesertBuilder::ExtractionLocation + FVector(0.f, 0.f, 620.f);
@@ -343,9 +413,16 @@ void AVantageGameMode::RestartRun()
 
 	Objective = EVantageObjective::FetchCache;
 
+	// New run, new combination, and the lock closes behind it.
+	if (Lock)
+	{
+		Lock->Destroy();
+	}
+
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	World->SpawnActor<AObjectiveCache>(ADesertBuilder::CacheLocation, FRotator::ZeroRotator, SpawnParams);
+	Lock = World->SpawnActor<ACodeLock>(ADesertBuilder::LockLocation, FRotator(0.f, 90.f, 0.f), SpawnParams);
+	ArmLock();
 
 	if (const APlayerController* PC = World->GetFirstPlayerController())
 	{

@@ -48,10 +48,20 @@ the whole tension of the thing.
 
 ## The loop
 
-**Get into the vault ruin to the north, take the cache, carry it back to the
-beacon you started on.** The vault is 46 metres out, past the ring the horde
-spawns on, and each wave puts an extra group directly in front of its door — so
-the objective is always on the far side of the dead.
+**Fight north to the vault ruin, read the combination off the plaque inside,
+climb the stairs, work the lock, take the cache, carry it back to the beacon.**
+The vault is 46 metres out, past the ring the horde spawns on, and each wave puts
+an extra group directly in front of its door — so the objective is always on the
+far side of the dead.
+
+The combination is four digits, rolled fresh every run and stencilled on a lit
+plaque on the ground floor. At the lock, **A/D** picks a dial, **W/S** turns it,
+**E** tries it and **R** steps back. Taking a hit while you are stood at it
+throws you out of it.
+
+A **robot dog** trots at your heel and runs down any shambler that gets within
+22 metres of you, biting until it drops. Zombies swat back, and enough of that
+puts the dog into a nine second reboot on its belly.
 
 Waves arrive on a timer with a countdown. Wave *N* fields `4 + (N-1)*2` on the
 ring plus `3 + N` around the vault. Clear a wave and you get six seconds before
@@ -70,6 +80,8 @@ Die and the run resets to wave one with the cache back in the vault.
 | `DesertBuilder` | Ground, ruined towers, the vault, cover, sky, sun and fog |
 | `VantageCharacter` | The gunslinger: body, walk cycle, aim, health, and the shot |
 | `ObjectiveCache` | The thing in the vault, and noticing when you reach it |
+| `CodeLock` | The four dial combination, and the state the HUD draws |
+| `RobotDog` | Heel, hunt and bite, plus the quadruped gait |
 | `Revolver` | Ammo, reload, recoil kick, muzzle flash, cylinder spin |
 | `ZombieCharacter` | Chase steering, shambling gait, damage and collapse |
 | `VantageHUD` | Crosshair, hit markers, health, ammo, banners — all Canvas |
