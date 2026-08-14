@@ -43,6 +43,12 @@ AZombieCharacter::AZombieCharacter()
 	// They walk into things constantly; sliding off beats stopping dead.
 	Movement->bUseSeparateBrakingFriction = false;
 
+	// Without this they never move an inch. CharacterMovement only runs
+	// ControlledCharacterMove when IsLocallyControlled() is true, which needs a
+	// Controller - and these are spawned by the game mode and never possessed,
+	// so every AddMovementInput was piling into a vector nothing consumed.
+	Movement->bRunPhysicsWithNoController = true;
+
 	BodyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("BodyRoot"));
 	BodyRoot->SetupAttachment(GetCapsuleComponent());
 
