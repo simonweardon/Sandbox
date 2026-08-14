@@ -7,6 +7,8 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerStart.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogVantage, Log, All);
+
 AVantageGameMode::AVantageGameMode()
 {
 	DefaultPawnClass = AVantageCharacter::StaticClass();
@@ -16,16 +18,43 @@ AVantageGameMode::AVantageGameMode()
 void AVantageGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
-	BuildLevel();
+	EnsureLevelBuilt();
 }
 
-void AVantageGameMode::BuildLevel()
+AActor* AVantageGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
+	// This runs inside RestartPlayer, before the pawn exists. Building here is
+	// the safety net that makes the InitGame ordering assumption non-critical.
+	EnsureLevelBuilt();
+
+	if (SpawnPoint)
+	{
+		return SpawnPoint;
+	}
+
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+void AVantageGameMode::StartPlay()
+{
+	EnsureLevelBuilt();
+	Super::StartPlay();
+}
+
+void AVantageGameMode::EnsureLevelBuilt()
+{
+	if (bLevelBuilt)
+	{
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
 	}
+
+	bLevelBuilt = true;
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -35,10 +64,16 @@ void AVantageGameMode::BuildLevel()
 	{
 		Builder->Build();
 	}
+	else
+	{
+		UE_LOG(LogVantage, Error, TEXT("Failed to spawn AFacilityBuilder; the level will be empty."));
+	}
 
-	// Spawned here rather than placed, so the default FindPlayerStart logic picks
-	// it up when the pawn spawns a moment from now.
-	World->SpawnActor<APlayerStart>(FVector(-480.f, 0.f, 110.f), FRotator(0.f, 0.f, 0.f), SpawnParams);
+	// Held on to directly rather than left for FindPlayerStart to discover, so
+	// the spawn point does not depend on actor iteration order.
+	SpawnPoint = World->SpawnActor<APlayerStart>(SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+
+	UE_LOG(LogVantage, Log, TEXT("Level built. Spawn point at %s."), *SpawnLocation.ToCompactString());
 }
 
 void AVantageGameMode::CollectShard()

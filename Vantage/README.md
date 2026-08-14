@@ -28,6 +28,28 @@ C++ at runtime. Clone, generate project files, build, press Play.
 You can also double-click `Vantage.uproject` — the editor offers to rebuild the
 module for you — but the first build is quicker and easier to read from the IDE.
 
+## Work you need to do in the editor
+
+**None, if it works.** There is nothing to author, import, wire up or configure.
+No Blueprints to create, no input assets to make, no level to lay out, no
+GameMode to assign in World Settings. Build, press Play.
+
+There is exactly **one** thing that might need you, and only if the demo starts
+in an empty void instead of the atrium: the project has to load *some* map, and
+it is pointed at `/Engine/Maps/Entry`, which ships with the engine and is empty.
+If your install doesn't have it, or its World Settings override the GameMode:
+
+1. **File → New Level → Empty Level**.
+2. Save it as `Content/Maps/Vantage`.
+3. **Edit → Project Settings → Maps & Modes**, set both *Editor Startup Map* and
+   *Game Default Map* to it.
+4. Check *Project Settings → Maps & Modes → Default GameMode* reads
+   `VantageGameMode`, and that the level's own **World Settings → GameMode
+   Override** is empty.
+
+That is a thirty second job and the only editor work in the project. Everything
+else is code.
+
 ## Controls
 
 | Action | Keyboard / mouse | Gamepad |
@@ -85,9 +107,10 @@ dependent.
 
 `Config/DefaultInput.ini` sets `DefaultPlayerInputClass` and
 `DefaultInputComponentClass` to the Enhanced Input versions. **Without those two
-lines nothing responds to the keyboard** — the pawn gets a plain
-`UInputComponent` and the cast fails. The character logs an error if that
-happens.
+lines nothing responds to the keyboard.** Both failure points log a distinct
+error naming the setting to fix, and a watchdog fires after eight seconds of
+total silence pointing at the same place — this failure is otherwise completely
+mute, which is what makes it expensive to diagnose.
 
 ### The level is spawned, not placed
 
@@ -95,9 +118,14 @@ happens.
 crate and plinth, colouring each with a dynamic material instance. Coordinates
 are in centimetres, floor surface at `Z = 0`, player entering from the west.
 
-It runs from `AVantageGameMode::InitGame` rather than `BeginPlay` because the
-engine spawns the player pawn *between* `InitGame` and the world's `BeginPlay`.
-Build any later and the player is dropped into a world with no floor.
+The build has to happen before the player pawn spawns, or the player drops into
+a world with no floor. `EnsureLevelBuilt()` is idempotent and called from three
+hooks in increasing order of desperation — `InitGame` (normal), then
+`ChoosePlayerStart` (which the engine guarantees runs *before* the pawn is
+spawned), then `StartPlay` (last resort). Only whichever fires first does any
+work. `AVantageCharacter` also runs a half-second timer that returns anyone who
+falls below `Z = -1200` to the spawn point, so a build failure degrades into a
+logged warning rather than falling through the void forever.
 
 Every spawned component sets `Movable` mobility **before** `RegisterComponent()`.
 Setting it after registration trips the "static component moved" warning, and
@@ -109,7 +137,20 @@ nothing here can be baked anyway.
 and shard pips with `DrawRect`/`DrawText`. Fonts come from `GEngine`. It costs
 some polish versus UMG and buys zero asset dependencies.
 
-## If it doesn't compile
+## Troubleshooting
+
+Every failure below announces itself in the Output Log with a line starting
+`Vantage:`. Filter on that first.
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Empty void, no room | Level never built, or the map overrode the GameMode | Check the log for `Level built`. If absent, see [editor work](#work-you-need-to-do-in-the-editor) |
+| Falling repeatedly | Geometry failed to spawn | Log will say so every half second; check the `Cube.Cube` load |
+| Nothing responds | Enhanced Input not wired | Log names the exact `DefaultInput.ini` setting |
+| Everything is grey | `"Color"` isn't the material's parameter name | Open `BasicShapeMaterial` and check |
+| Too dark to see | Light intensity guesses are off | Press F for the flashlight, then see [Tuning](#tuning) |
+
+### If it doesn't compile
 
 The code is written against the 5.4 API, but it has never been through a
 compiler. If something fails, these are the places to look first:

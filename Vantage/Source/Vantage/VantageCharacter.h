@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "GameFramework/Character.h"
 #include "VantageCharacter.generated.h"
 
@@ -26,6 +27,7 @@ class VANTAGE_API AVantageCharacter : public ACharacter
 public:
 	AVantageCharacter();
 
+	virtual void BeginPlay() override;
 	virtual void PostInitializeComponents() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
@@ -55,6 +57,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage|Look")
 	float GamepadLookRate = 140.f;
 
+	/** Falling past this Z puts the player back at the spawn point. */
+	UPROPERTY(EditDefaultsOnly, Category = "Vantage|Safety")
+	float FallRecoveryZ = -1200.f;
+
 private:
 	/** Creates the transient InputAction / InputMappingContext objects. Idempotent. */
 	void BuildInputBindings();
@@ -67,6 +73,18 @@ private:
 	void ToggleCrouch();
 	void TryInteract();
 	void ToggleFlashlight();
+
+	/** Puts the player back on the floor if they end up under the level. */
+	void CheckForFall();
+
+	/** Fires once, a few seconds in, if no input has arrived at all. */
+	void ReportSilentInput();
+
+	FTimerHandle FallCheckTimer;
+	FTimerHandle InputWatchdogTimer;
+
+	/** Set by the first input of any kind. Only used for the watchdog message. */
+	bool bReceivedAnyInput = false;
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> MoveAction;

@@ -2,6 +2,9 @@
 
 #include "Interactable.h"
 #include "InteractionProbe.h"
+#include "VantageGameMode.h"
+
+#include "TimerManager.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -68,6 +71,56 @@ void AVantageCharacter::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	BuildInputBindings();
+}
+
+void AVantageCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Cheap insurance rather than a per-frame tick: if the floor somehow was not
+	// there when we spawned, this catches the fall instead of dropping forever.
+	GetWorldTimerManager().SetTimer(
+		FallCheckTimer, this, &AVantageCharacter::CheckForFall, 0.5f, true);
+
+	GetWorldTimerManager().SetTimer(
+		InputWatchdogTimer, this, &AVantageCharacter::ReportSilentInput, 8.f, false);
+}
+
+void AVantageCharacter::CheckForFall()
+{
+	if (GetActorLocation().Z > FallRecoveryZ)
+	{
+		return;
+	}
+
+	FVector Recovery(-480.f, 0.f, 110.f);
+	if (const AVantageGameMode* GameMode = GetWorld()->GetAuthGameMode<AVantageGameMode>())
+	{
+		Recovery = GameMode->GetSpawnLocation();
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Vantage: player fell out of the level and was returned to %s. ")
+		TEXT("If this repeats immediately, the level geometry is not being built."),
+		*Recovery.ToCompactString());
+
+	GetCharacterMovement()->StopMovementImmediately();
+	SetActorLocation(Recovery, false, nullptr, ETeleportType::TeleportPhysics);
+}
+
+void AVantageCharacter::ReportSilentInput()
+{
+	if (bReceivedAnyInput)
+	{
+		return;
+	}
+
+	// Not fatal on its own - the player may simply not have touched anything -
+	// but if the game feels dead this is the first place to look.
+	UE_LOG(LogTemp, Warning,
+		TEXT("Vantage: no input received in the first 8 seconds. If nothing responds, check that ")
+		TEXT("Config/DefaultInput.ini sets DefaultPlayerInputClass and DefaultInputComponentClass ")
+		TEXT("to the EnhancedInput versions, and that the EnhancedInput plugin is enabled."));
 }
 
 void AVantageCharacter::BuildInputBindings()
@@ -149,21 +202,31 @@ void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 	BuildInputBindings();
 
-	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
+	// Two things can fail here, and both fail silently by default, so each one
+	// gets its own error. Between them they cover every "nothing responds to the
+	// keyboard" case short of the plugin being disabled outright.
+	const APlayerController* PC = Cast<APlayerController>(GetController());
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = PC
+		? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer())
+		: nullptr;
+
+	if (Subsystem)
 	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-		{
-			Subsystem->AddMappingContext(InputContext, 0);
-		}
+		Subsystem->AddMappingContext(InputContext, 0);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Vantage: no EnhancedInputLocalPlayerSubsystem. Check that DefaultPlayerInputClass ")
+			TEXT("in Config/DefaultInput.ini is /Script/EnhancedInput.EnhancedPlayerInput."));
 	}
 
 	UEnhancedInputComponent* Input = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 	if (!Input)
 	{
-		// Almost always means DefaultInputComponentClass is not pointing at
-		// EnhancedInputComponent in Config/DefaultInput.ini.
-		UE_LOG(LogTemp, Error, TEXT("Vantage: expected an EnhancedInputComponent; input will not work."));
+		UE_LOG(LogTemp, Error,
+			TEXT("Vantage: pawn was given a plain UInputComponent. Set DefaultInputComponentClass ")
+			TEXT("in Config/DefaultInput.ini to /Script/EnhancedInput.EnhancedInputComponent."));
 		return;
 	}
 
@@ -181,6 +244,8 @@ void AVantageCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 void AVantageCharacter::Move(const FInputActionValue& Value)
 {
+	bReceivedAnyInput = true;
+
 	const FVector2D Axis = Value.Get<FVector2D>();
 	if (!Controller || Axis.IsNearlyZero())
 	{
@@ -197,6 +262,8 @@ void AVantageCharacter::Move(const FInputActionValue& Value)
 
 void AVantageCharacter::Look(const FInputActionValue& Value)
 {
+	bReceivedAnyInput = true;
+
 	const FVector2D Axis = Value.Get<FVector2D>();
 	AddControllerYawInput(Axis.X * MouseSensitivity);
 	AddControllerPitchInput(-Axis.Y * MouseSensitivity);
