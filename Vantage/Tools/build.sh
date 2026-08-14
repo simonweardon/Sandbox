@@ -96,12 +96,27 @@ if [[ $RESULT -eq 0 ]]; then
 else
     echo "BUILD FAILED with code $RESULT."
     echo
-    echo "First errors (full log in build-log.txt):"
     echo "-----------------------------------------------------------------"
-    # One error cascades into hundreds, so keep only the first handful.
-    grep -E "error:|Error:" "$LOG" | head -12
+
+    # One compile error cascades into hundreds, so when there are real errors
+    # only the first handful are worth reading.
+    MATCHED="$(grep -iE "error[: ]|fatal|exception|cannot open|undefined symbol" "$LOG" | head -15)"
+
+    if [[ -n "$MATCHED" ]]; then
+        echo "$MATCHED"
+    else
+        # UnrealBuildTool can fail before it ever compiles anything - a bad
+        # target setting, a missing module - and those failures match none of
+        # the patterns above. An empty report is useless, so fall back to the
+        # end of the log, which is where UBT states its reason.
+        echo "(no compile errors matched; showing the end of the log instead)"
+        echo
+        tail -30 "$LOG"
+    fi
+
     echo "-----------------------------------------------------------------"
     echo
+    echo "Full log: $LOG"
     echo "Paste the block above back to Claude."
 fi
 
