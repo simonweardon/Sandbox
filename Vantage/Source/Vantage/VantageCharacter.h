@@ -110,7 +110,9 @@ protected:
 
 private:
 	void BuildInputBindings();
-	UStaticMeshComponent* AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation, const FLinearColor& Colour);
+	/** Colour is applied in BeginPlay, not here: tinting during construction
+	 *  would write the material onto the class default object. */
+	UStaticMeshComponent* AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation);
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
@@ -134,17 +136,17 @@ private:
 	UPROPERTY(Transient) TObjectPtr<ARevolver> Revolver;
 
 	// Body parts. Tinted in BeginPlay, animated in UpdateBody.
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Torso;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Coat;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Head;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Hair;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Beard;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> BeardTaper;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Moustache;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> GunArm;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> FreeArm;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> LeftLeg;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> RightLeg;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Torso;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Coat;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Head;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Hair;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Beard;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> BeardTaper;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> Moustache;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> GunArm;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> FreeArm;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> LeftLeg;
+	UPROPERTY(VisibleAnywhere, Category = "Vantage|Body") TObjectPtr<UStaticMeshComponent> RightLeg;
 
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputContext;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> MoveAction;

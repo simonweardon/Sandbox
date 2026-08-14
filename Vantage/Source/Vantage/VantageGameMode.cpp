@@ -139,6 +139,14 @@ void AVantageGameMode::StartWave(int32 WaveNumber)
 	SpawnSalt += Guards;
 
 	UE_LOG(LogVantage, Log, TEXT("Wave %d: %d shamblers, %d around the vault."), Wave, Count, Guards);
+
+	// If nothing actually spawned, the "wave cleared" path never fires and the
+	// run stalls with no zombies and no countdown. Fall back to another break.
+	if (ZombiesAlive == 0)
+	{
+		UE_LOG(LogVantage, Error, TEXT("Wave %d spawned no zombies; retrying after a break."), Wave);
+		BeginIntermission();
+	}
 }
 
 void AVantageGameMode::SpawnVaultGuards(int32 Count, int32 Seed)

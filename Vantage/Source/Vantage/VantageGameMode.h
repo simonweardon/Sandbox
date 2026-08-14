@@ -102,7 +102,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<APlayerStart> SpawnPoint;
 
-	FVector SpawnLocation = FVector(0.f, 0.f, 140.f);
+	/**
+	 * Offset south of the pad, not on it. The extraction beacon's mast is a
+	 * solid cylinder at the origin, and spawning inside it wedges the player.
+	 * Still well within ExtractionRadius, so this counts as standing on the pad.
+	 */
+	FVector SpawnLocation = FVector(0.f, -230.f, 140.f);
 
 	/** How close to the pad counts as extracted. */
 	UPROPERTY(EditDefaultsOnly, Category = "Vantage")

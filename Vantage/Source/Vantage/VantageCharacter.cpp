@@ -84,23 +84,26 @@ AVantageCharacter::AVantageCharacter()
 	AimPivot->SetRelativeLocation(FVector(0.f, 0.f, 44.f));
 
 	// Built around the capsule centre: feet at -92, crown near +90.
-	LeftLeg  = AddBodyPart(TEXT("LeftLeg"),  BodyRoot, FVector(0.f, -13.f, -52.f), FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator, TrouserColour);
-	RightLeg = AddBodyPart(TEXT("RightLeg"), BodyRoot, FVector(0.f, 13.f, -52.f),  FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator, TrouserColour);
-	Torso    = AddBodyPart(TEXT("Torso"),    BodyRoot, FVector(0.f, 0.f, 20.f),    FVector(15.f, 22.f, 30.f), FRotator::ZeroRotator, ShirtColour);
-	Coat     = AddBodyPart(TEXT("Coat"),     BodyRoot, FVector(-2.f, 0.f, 6.f),    FVector(17.f, 24.f, 24.f), FRotator::ZeroRotator, CoatColour);
+	LeftLeg  = AddBodyPart(TEXT("LeftLeg"),  BodyRoot, FVector(0.f, -13.f, -52.f), FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator);
+	RightLeg = AddBodyPart(TEXT("RightLeg"), BodyRoot, FVector(0.f, 13.f, -52.f),  FVector(11.f, 10.f, 40.f), FRotator::ZeroRotator);
+	Torso    = AddBodyPart(TEXT("Torso"),    BodyRoot, FVector(0.f, 0.f, 20.f),    FVector(15.f, 22.f, 30.f), FRotator::ZeroRotator);
+	Coat     = AddBodyPart(TEXT("Coat"),     BodyRoot, FVector(-2.f, 0.f, 6.f),    FVector(17.f, 24.f, 24.f), FRotator::ZeroRotator);
 
-	Head     = AddBodyPart(TEXT("Head"),     BodyRoot, FVector(2.f, 0.f, 74.f),    FVector(12.f, 11.f, 13.f), FRotator::ZeroRotator, SkinColour);
-	Hair     = AddBodyPart(TEXT("Hair"),     BodyRoot, FVector(0.f, 0.f, 86.f),    FVector(12.5f, 11.5f, 4.f), FRotator::ZeroRotator, HairColour);
+	// Head sits low enough to meet the torso: the shoulders top out at Z 50, so
+	// anything above about Z 63 leaves him decapitated with a gap for a neck.
+	Head     = AddBodyPart(TEXT("Head"),     BodyRoot, FVector(2.f, 0.f, 62.f),    FVector(12.f, 11.f, 13.f), FRotator::ZeroRotator);
+	Hair     = AddBodyPart(TEXT("Hair"),     BodyRoot, FVector(0.f, 0.f, 74.f),    FVector(12.5f, 11.5f, 4.f), FRotator::ZeroRotator);
 
 	// The beard: a full jaw piece, a tapering point below it, and a moustache
-	// sitting proud of the face.
-	Beard      = AddBodyPart(TEXT("Beard"),      BodyRoot, FVector(9.f, 0.f, 63.f),  FVector(7.f, 10.f, 11.f),  FRotator::ZeroRotator, HairColour);
-	BeardTaper = AddBodyPart(TEXT("BeardTaper"), BodyRoot, FVector(8.f, 0.f, 49.f),  FVector(5.f, 6.5f, 6.f),   FRotator(6.f, 0.f, 0.f), HairColour);
-	Moustache  = AddBodyPart(TEXT("Moustache"),  BodyRoot, FVector(13.f, 0.f, 71.f), FVector(2.5f, 7.5f, 2.5f), FRotator::ZeroRotator, HairColour);
+	// sitting proud of the face. Pushed forward in X so it hangs in front of the
+	// chest rather than inside it.
+	Beard      = AddBodyPart(TEXT("Beard"),      BodyRoot, FVector(10.f, 0.f, 54.f), FVector(7.f, 9.5f, 10.f),  FRotator::ZeroRotator);
+	BeardTaper = AddBodyPart(TEXT("BeardTaper"), BodyRoot, FVector(12.f, 0.f, 42.f), FVector(4.5f, 5.5f, 5.5f), FRotator(7.f, 0.f, 0.f));
+	Moustache  = AddBodyPart(TEXT("Moustache"),  BodyRoot, FVector(14.f, 0.f, 59.f), FVector(2.5f, 7.5f, 2.5f), FRotator::ZeroRotator);
 
 	// Gun arm hangs off the aim pivot; the free arm swings with the walk.
-	GunArm  = AddBodyPart(TEXT("GunArm"),  AimPivot, FVector(16.f, 20.f, 0.f),   FVector(8.f, 8.f, 26.f), FRotator(72.f, 0.f, 0.f), CoatColour);
-	FreeArm = AddBodyPart(TEXT("FreeArm"), BodyRoot, FVector(0.f, -24.f, 20.f),  FVector(8.f, 8.f, 27.f), FRotator(8.f, 0.f, 0.f),  CoatColour);
+	GunArm  = AddBodyPart(TEXT("GunArm"),  AimPivot, FVector(16.f, 20.f, 0.f),   FVector(8.f, 8.f, 26.f), FRotator(72.f, 0.f, 0.f));
+	FreeArm = AddBodyPart(TEXT("FreeArm"), BodyRoot, FVector(0.f, -24.f, 20.f),  FVector(8.f, 8.f, 27.f), FRotator(8.f, 0.f, 0.f));
 
 	GunHand = CreateDefaultSubobject<USceneComponent>(TEXT("GunHand"));
 	GunHand->SetupAttachment(AimPivot);
@@ -124,7 +127,7 @@ AVantageCharacter::AVantageCharacter()
 	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
-UStaticMeshComponent* AVantageCharacter::AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation, const FLinearColor& Colour)
+UStaticMeshComponent* AVantageCharacter::AddBodyPart(const TCHAR* Name, USceneComponent* Parent, const FVector& Location, const FVector& HalfExtent, const FRotator& Rotation)
 {
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
 
