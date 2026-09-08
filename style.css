@@ -42,6 +42,7 @@ body {
 .hud-flags .pip { width: 26px; height: 9px; border-radius: 2px; background: #777; }
 .hud-flags .pip.contested { outline: 1px solid #f0e6a0; outline-offset: 1px; }
 .hud-clock { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--dim); letter-spacing: 0.06em; }
+.hud-clock.urgent { color: #e0b060; }
 .hud-speed { display: flex; gap: 3px; }
 .hud-speed .spd {
   font: inherit; font-size: 10px; color: var(--dim); cursor: pointer;

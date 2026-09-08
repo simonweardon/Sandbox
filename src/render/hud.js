@@ -109,7 +109,7 @@ export class Hud {
     this.end.innerHTML = `
       <div class="end-card ${won ? 'won' : 'lost'}">
         <div class="end-title">${won ? 'VICTORY' : 'DEFEAT'}</div>
-        <div class="end-sub">${b.sideName(over.winner)} ${over.reason} after ${clock}</div>
+        <div class="end-sub">${b.sideName(over.winner)} ${over.reason}, after ${clock}</div>
         <div class="end-stats">
           <div><b>${dead.length - myDead}</b> enemy killed</div>
           <div><b>${myDead}</b> of yours lost</div>
@@ -218,8 +218,10 @@ export class Hud {
       pip.classList.toggle('contested', !!f.contestedBy);
     });
 
-    const t = Math.floor(b.time);
-    this.clock.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    const left = Math.max(0, Math.floor(b.timeLeft));
+    this.clock.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    this.clock.classList.toggle('urgent', left < 120);
+    this.clock.title = 'Time remaining before the battle is decided on ground held';
 
     for (const { btn, item } of this.callButtons) {
       btn.classList.toggle('poor', purse.mp < item.cost);

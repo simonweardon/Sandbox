@@ -46,6 +46,10 @@ export class Battle {
 
     this.accumulator = 0;
     this.time = 0;
+    // A battle has to be able to end. Sweeping every objective wins it
+    // outright, but a city fight where both sides are dug into buildings can
+    // grind for ever, so there is also a clock and a decision on points.
+    this.timeLimit = opts.timeLimit ?? 30 * 60;
     this.paused = false;
     this.speed = 1;
     this.over = null;
@@ -182,13 +186,51 @@ export class Battle {
   checkVictory() {
     if (this.over) return;
     const counts = scoreLine(this);
-    for (const side of Object.keys(this.sides)) {
+    const sides = Object.keys(this.sides);
+
+    // Outright: every objective in one side's hands.
+    for (const side of sides) {
       if ((counts[side] || 0) === this.world.flags.length) {
-        this.over = { winner: side, reason: 'all objectives held' };
-        this.world.logLine(`${this.sideName(side)} holds every objective — battle won`, 'flag');
+        this.finish(side, 'holds every objective');
+        return;
       }
     }
+
+    // Spent: nothing left on the field and no manpower to bring anything back.
+    const cheapest = Math.min(...Object.values(this.callList(sides[0]))
+      .flat().map((c) => c.cost));
+    for (const side of sides) {
+      const left = this.world.entities.some((e) => e.faction === side
+        && !(e.kind === KIND.VEHICLE && (e.destroyed || e.abandoned))
+        && !(e.kind === KIND.GUN && e.destroyed));
+      if (!left && this.sides[side].mp < cheapest) {
+        this.finish(sides.find((o) => o !== side), 'has broken the opposition');
+        return;
+      }
+    }
+
+    // On points, when the clock runs out.
+    if (this.time >= this.timeLimit) {
+      const ranked = sides.slice().sort((a, b) => {
+        const d = (counts[b] || 0) - (counts[a] || 0);
+        if (d) return d;
+        // Level on ground: the side that cost the other more wins.
+        return this.world.corpses.filter((c) => c.faction === a).length
+          - this.world.corpses.filter((c) => c.faction === b).length;
+      });
+      const [win, lose] = ranked;
+      const drawn = (counts[win] || 0) === (counts[lose] || 0);
+      this.finish(win, drawn ? 'holds the field on casualties' : 'holds more ground when time is called');
+    }
   }
+
+  finish(winner, reason) {
+    this.over = { winner, reason };
+    this.world.logLine(`${this.sideName(winner)} ${reason} — battle over`, 'flag');
+  }
+
+  /** Seconds left before the battle is decided on points. */
+  get timeLeft() { return Math.max(0, this.timeLimit - this.time); }
 
   // ---- queries the interface needs --------------------------------------
 
