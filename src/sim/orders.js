@@ -8,11 +8,14 @@ import { KIND } from './world.js';
 import { STANCE, STANCE_SPEED, boardVehicle, disembark, canDrive, vehicleManned } from './units.js';
 import { findPath } from './pathfinding.js';
 import { breakProp } from './damage.js';
+import { enterBuilding, leaveBuilding, isGarrisonable } from './garrison.js';
 import { clamp, angleDelta, turnTowards, dist, TAU, DEG } from '../core/util.js';
+import { propDistance, nearestOnProp } from './shapes.js';
 
 export const ORDER = {
   MOVE: 'move', ATTACK_MOVE: 'attackMove', ATTACK: 'attack', HOLD: 'hold',
   BOARD: 'board', DISEMBARK: 'disembark', CAPTURE: 'capture', LOOK: 'look', REPAIR: 'repair',
+  GARRISON: 'garrison',
 };
 
 export function issueOrder(battle, unit, order, queue = false) {
@@ -32,6 +35,19 @@ export function beginOrder(battle, unit) {
     unit.pathIndex = 0;
     unit.state = 'moving';
     unit.blockedFor = 0;
+  } else if (o.type === ORDER.GARRISON) {
+    const p = world.propsById.get(o.propId);
+    if (!isGarrisonable(p)) { finishOrder(battle, unit); return; }
+    // Walk to the doorstep, not to the middle of the building: the nav grid
+    // blocks the footprint, so a path aimed at the centre stops short of it.
+    const edge = nearestOnProp(p, unit.x, unit.z);
+    const dx = edge.x - p.x, dz = edge.z - p.z;
+    const len = Math.hypot(dx, dz) || 1;
+    const doorX = edge.x + (dx / len) * 2.2, doorZ = edge.z + (dz / len) * 2.2;
+    const path = findPath(battle.nav, unit.x, unit.z, doorX, doorZ, false);
+    unit.path = path || [{ x: doorX, z: doorZ }];
+    unit.pathIndex = 0;
+    unit.state = 'entering';
   } else if (o.type === ORDER.BOARD) {
     const v = world.byId.get(o.vehicleId);
     if (!v) { finishOrder(battle, unit); return; }
@@ -82,6 +98,13 @@ function stepSoldier(battle, s, dt) {
 
   const o = s.orders[0];
 
+  // In a building: he holds his window until told to do something that needs
+  // his feet, in which case he comes down first.
+  if (s.garrison != null) {
+    if (o && o.type !== ORDER.GARRISON) leaveBuilding(world, s);
+    else return;
+  }
+
   // Men who have had enough run for the nearest cover, orders or no orders.
   if (s.morale <= 0.16 && s.suppression > 0.8) {
     s.state = 'routing';
@@ -111,10 +134,24 @@ function stepSoldier(battle, s, dt) {
     }
   }
 
+  if (o.type === ORDER.GARRISON) {
+    const p = world.propsById.get(o.propId);
+    if (!isGarrisonable(p)) { finishOrder(battle, s); return; }
+    // A nav cell is four metres, so a man can only get so close to a wall.
+    if (propDistance(p, s.x, s.z) < 5.5) {
+      // If it is full he simply stays outside; his commander will find him
+      // something else to do rather than filling the log with complaints.
+      enterBuilding(world, s, p);
+      finishOrder(battle, s);
+      return;
+    }
+  }
+
   const wp = currentWaypoint(s);
   if (!wp) {
     if (o.type === ORDER.MOVE || o.type === ORDER.ATTACK_MOVE) finishOrder(battle, s);
     else if (o.type === ORDER.CAPTURE) s.state = 'capturing';
+    else if (o.type === ORDER.GARRISON) finishOrder(battle, s);
     return;
   }
   const arrived = moveToward(battle, s, wp.x, wp.z, dt, 1);

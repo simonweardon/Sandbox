@@ -7,6 +7,7 @@
 import { Terrain, GROUND } from './terrain.js';
 import { makeRng, reseed, roll } from '../core/rng.js';
 import { clamp, dist2, pointSegDist2, DEG } from '../core/util.js';
+import { propDistance, propSegmentT, propReach } from './shapes.js';
 
 export const KIND = { SOLDIER: 'soldier', VEHICLE: 'vehicle', GUN: 'gun', PROP: 'prop', CRATE: 'crate' };
 
@@ -14,11 +15,11 @@ const HASH_CELL = 16;
 const PROP_CELL = 16;
 
 export class World {
-  constructor(sizeM = 512, seed = 20240607) {
+  constructor(sizeM = 512, seed = 20240607, terrainOpts = {}) {
     reseed(seed);
     this.seed = seed;
     this.size = sizeM;
-    this.terrain = new Terrain(sizeM, seed);
+    this.terrain = new Terrain(sizeM, seed, terrainOpts);
     this.entities = [];
     this.byId = new Map();
     this.props = [];
@@ -31,6 +32,7 @@ export class World {
     this.tick = 0;
     this.hash = new Map();
     this.propGrid = new Map();      // static scenery, indexed once and patched
+    this.propsById = new Map();
     this.factions = {};
     this.corpses = [];
     this.decals = [];
@@ -129,6 +131,7 @@ export class World {
     p.alive = true;
     p.hp = p.hp ?? 100;
     this.props.push(p);
+    this.propsById.set(p.id, p);
     this.indexProp(p);
     return p;
   }
@@ -139,7 +142,7 @@ export class World {
    * and walking all four hundred props each time is not affordable.
    */
   indexProp(p) {
-    const r = p.radius + (p.len ? p.len / 2 : 0);
+    const r = propReach(p) + (p.len ? p.len / 2 : 0);
     const i0 = ((p.x - r) / PROP_CELL) | 0, i1 = ((p.x + r) / PROP_CELL) | 0;
     const j0 = ((p.z - r) / PROP_CELL) | 0, j1 = ((p.z + r) / PROP_CELL) | 0;
     for (let j = j0; j <= j1; j++) {
@@ -198,8 +201,7 @@ export class World {
     const hits = [];
     for (const p of this.propsNearSegment(ax, az, bx, bz, pad + 4)) {
       if (!p.alive || !p.blocksLos) continue;
-      const r = p.radius + pad;
-      if (pointSegDist2(p.x, p.z, ax, az, bx, bz) <= r * r) hits.push(p);
+      if (propSegmentT(p, ax, az, bx, bz, pad) !== null) hits.push(p);
     }
     return hits;
   }
@@ -208,19 +210,20 @@ export class World {
    * Can `ay`-high point A see `by`-high point B? Checks the ground first,
    * then anything solid standing on it. Returns null when the view is clear.
    */
-  losBlocker(ax, ay, az, bx, by, bz, ignore) {
+  losBlocker(ax, ay, az, bx, by, bz, ignore, ignore2) {
     const g = this.terrain.losBlocked(ax, ay, az, bx, by, bz);
     if (g) return { kind: 'terrain', ...g };
-    const len = Math.hypot(bx - ax, bz - az) || 1;
     for (const p of this.propsNearSegment(ax, az, bx, bz, 3, this._losScratch)) {
-      if (!p.alive || !p.blocksLos || p === ignore) continue;
-      const d2 = pointSegDist2(p.x, p.z, ax, az, bx, bz);
-      if (d2 > p.radius * p.radius) continue;
-      // How high is the sight line where it crosses this prop?
-      const t = clamp(((p.x - ax) * (bx - ax) + (p.z - az) * (bz - az)) / (len * len), 0, 1);
+      if (!p.alive || !p.blocksLos || p === ignore || p === ignore2) continue;
+      // Where the line actually enters the footprint, not where it passes the
+      // centre — for a long building those are nowhere near each other.
+      const t = propSegmentT(p, ax, az, bx, bz);
+      if (t === null) continue;
       const lineY = ay + (by - ay) * t;
       const top = this.terrain.heightAt(p.x, p.z) + p.height;
-      if (lineY < top) return { kind: 'prop', prop: p, x: p.x, y: lineY, z: p.z };
+      if (lineY < top) {
+        return { kind: 'prop', prop: p, x: ax + (bx - ax) * t, y: lineY, z: az + (bz - az) * t };
+      }
     }
     return null;
   }
@@ -237,13 +240,14 @@ export class World {
     const nx = dx / len, nz = dz / len;
     for (const p of this.propsNearPoint(x, z, 4, this._coverScratch)) {
       if (!p.alive || !p.cover) continue;
-      const d = Math.hypot(p.x - x, p.z - z);
-      if (d > p.radius + 2.2) continue;
-      // Only counts if the prop is between the target and the shooter.
-      const px = (p.x - x) / (d || 1), pz = (p.z - z) / (d || 1);
-      const facing = px * nx + pz * nz;
+      const edge = propDistance(p, x, z);
+      if (edge > 2.4) continue;
+      // Only counts if it stands between the target and whoever is shooting.
+      const cx = p.x - x, cz = p.z - z;
+      const cl = Math.hypot(cx, cz) || 1;
+      const facing = (cx / cl) * nx + (cz / cl) * nz;
       if (facing < 0.15) continue;
-      best = Math.max(best, p.cover * clamp(facing, 0, 1) * clamp(1 - (d - p.radius) / 2.6, 0, 1));
+      best = Math.max(best, p.cover * clamp(facing, 0, 1) * clamp(1 - edge / 2.6, 0, 1));
     }
     return best;
   }
@@ -304,7 +308,7 @@ export function populateScenery(world) {
       world.addProp({
         type: 'house', x, z, y: T.heightAt(x, z), yaw: Math.round(rng() * 4) * (Math.PI / 2) + (rng() - 0.5) * 0.3,
         w, d, height: rng() < 0.35 ? 7.5 : 5.2, radius: Math.max(w, d) * 0.55,
-        blocksLos: true, blocksMove: true, cover: 0.8, hp: 2200, destructible: true,
+        blocksLos: true, blocksMove: true, cover: 0.8, hp: 9000, destructible: true,
         garrison: [], capacity: 6,
       });
     }

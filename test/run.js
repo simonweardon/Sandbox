@@ -10,13 +10,18 @@ import { VEHICLES, GUNS, componentLayout } from '../src/data/vehicles.js';
 import { SQUADS, KITS, ROLES } from '../src/data/infantry.js';
 import { FACTIONS } from '../src/data/factions.js';
 import { hitProxy, pickFacet, impactAngle, resolveArmour, RESULT } from '../src/sim/penetration.js';
-import { World, populateScenery } from '../src/sim/world.js';
+import { World } from '../src/sim/world.js';
+import { MAPS } from '../src/sim/maps.js';
+import { windowSlots, enterBuilding, leaveBuilding, garrisonCount, isGarrisonable, floorHeight } from '../src/sim/garrison.js';
+import { propDistance, propSegmentT, isBoxed } from '../src/sim/shapes.js';
 import { Terrain } from '../src/sim/terrain.js';
 import { NavGrid, findPath } from '../src/sim/pathfinding.js';
 import { makeVehicle, makeSquad, makeGun, makeSoldier, boardVehicle, disembark } from '../src/sim/units.js';
 import { fireWeapon, stepProjectiles, solveElevationDrag } from '../src/sim/ballistics.js';
 import { applySpall, evaluateVehicle, explode, stepAttrition } from '../src/sim/damage.js';
 import { Battle, TICK } from '../src/sim/battle.js';
+import { Commander } from '../src/sim/ai.js';
+import { eyeHeight, signature } from '../src/sim/vision.js';
 import { DEG } from '../src/core/util.js';
 import { reseed } from '../src/core/rng.js';
 
@@ -308,8 +313,8 @@ test('terrain blocks line of sight over a rise', () => {
   assert(clear > 0, 'some lines should be clear');
 });
 test('paths route round obstacles and tanks take different routes to men', () => {
-  const w = new World(512, 20240607);
-  populateScenery(w);
+  const w = new World(512, 20240607, MAPS.countryside.terrain);
+  MAPS.countryside.build(w);
   const nav = new NavGrid(w);
   const foot = findPath(nav, 40, 40, 470, 470, false);
   const tank = findPath(nav, 40, 40, 470, 470, true);
@@ -321,8 +326,8 @@ test('paths route round obstacles and tanks take different routes to men', () =>
   assert(len(tank) < direct * 1.6, 'and should not be a wild detour either');
 });
 test('pathfinding is fast enough to run on demand', () => {
-  const w = new World(512, 20240607);
-  populateScenery(w);
+  const w = new World(512, 20240607, MAPS.countryside.terrain);
+  MAPS.countryside.build(w);
   const nav = new NavGrid(w);
   const t0 = Date.now();
   for (let i = 0; i < 60; i++) {
@@ -381,6 +386,148 @@ test('the same seed gives the same battle', () => {
     return `${b.world.entities.length}|${b.world.corpses.length}|${JSON.stringify(b.stats().flags)}`;
   };
   assert(run(31337) === run(31337), 'two runs of the same seed diverged');
+});
+
+console.log('Footprints, the city, and the buildings in it');
+test('a long building blocks its own ground and not the street beside it', () => {
+  const block = { x: 100, z: 100, w: 40, d: 14, yaw: 0 };
+  assert(isBoxed(block), 'a prop with w and d is a box');
+  assert(propDistance(block, 100, 100) === 0, 'inside is inside');
+  assert(propDistance(block, 119, 100) < 0.01, 'still inside along its length');
+  assertBetween(propDistance(block, 100, 110), 2.5, 3.5, 'distance to the side');
+  assert(propSegmentT(block, 60, 110, 140, 110) === null, 'the street beside it is clear');
+  assert(propSegmentT(block, 60, 100, 140, 100) !== null, 'a line through it is not');
+});
+test('turning a building turns its footprint with it', () => {
+  const along = { x: 100, z: 100, w: 40, d: 14, yaw: 0 };
+  const across = { x: 100, z: 100, w: 40, d: 14, yaw: Math.PI / 2 };
+  assert(propSegmentT(along, 60, 110, 140, 110) === null, 'clear when it lies along the street');
+  assert(propSegmentT(across, 60, 110, 140, 110) !== null, 'blocked when it lies across it');
+});
+test('the city generates a street grid with blocks between the streets', () => {
+  const w = new World(512, 20240607, MAPS.city.terrain);
+  assert(w.terrain.blocks && w.terrain.blocks.length > 30, 'the grid should produce blocks');
+  const flat = w.terrain.height.reduce((a, h) => Math.max(a, Math.abs(h)), 0);
+  assert(flat < 6, `a city should be flat: relief is ${flat.toFixed(1)} m`);
+});
+test('the city is full of buildings and they can be occupied', () => {
+  const w = new World(512, 20240607, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const houses = w.props.filter((p) => isGarrisonable(p));
+  assert(houses.length > 80, `expected a city, got ${houses.length} buildings`);
+  assert(w.props.some((p) => p.type === 'factory'), 'there should be a factory');
+  assert(w.props.filter((p) => p.type === 'ruin').length > 10, 'some of it should already be ruined');
+  assert(houses.every((p) => p.w > 0 && p.d > 0), 'buildings must have real footprints');
+});
+test('the streets are passable even though the blocks are not', () => {
+  const w = new World(512, 20240607, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const nav = new NavGrid(w);
+  assert(findPath(nav, 256, 20, 256, 490, true), 'armour must be able to cross the city');
+  assert(findPath(nav, 20, 20, 490, 490, false), 'infantry must be able to cross it');
+});
+test('a path can start inside a building, which is where garrisons come from', () => {
+  const w = new World(512, 20240607, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const nav = new NavGrid(w);
+  const house = w.props.find((p) => isGarrisonable(p) && p.w > 20);
+  assert(findPath(nav, house.x, house.z, 256, 256, false), 'must find a way out of the building');
+});
+test('men occupy windows, up to the building capacity', () => {
+  const w = new World(512, 7, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const house = w.props.find((p) => isGarrisonable(p) && p.capacity >= 5);
+  assert(windowSlots(house).length >= house.capacity, 'a window each, at least');
+  const men = [];
+  for (let i = 0; i < house.capacity + 4; i++) men.push(makeSoldier(w, 'sov', 'rifleman', house.x, house.z));
+  w.rebuildHash();
+  let admitted = 0;
+  for (const m of men) if (enterBuilding(w, m, house)) admitted++;
+  assert(admitted === house.capacity, `admitted ${admitted}, capacity ${house.capacity}`);
+  assert(garrisonCount(w, house) === house.capacity);
+  const upstairs = men.filter((m) => m.garrison != null && m.garrisonFloor > 0);
+  assert(upstairs.length > 0, 'somebody should be on an upper floor');
+  for (const m of men) {
+    if (m.garrison == null) continue;
+    assert(m.y > w.terrain.heightAt(m.x, m.z) + 0.8, 'a garrisoned man stands above the ground');
+  }
+});
+test('leaving a building puts a man outside it, on the ground', () => {
+  const w = new World(512, 7, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const house = w.props.find((p) => isGarrisonable(p) && p.capacity >= 4);
+  const s = makeSoldier(w, 'sov', 'rifleman', house.x, house.z);
+  w.rebuildHash();
+  assert(enterBuilding(w, s, house));
+  leaveBuilding(w, s);
+  assert(s.garrison === null, 'no longer inside');
+  assert(propDistance(house, s.x, s.z) > 0.5, 'and standing clear of the wall');
+  assertBetween(s.y - w.terrain.heightAt(s.x, s.z), -0.01, 0.01, 'back on the ground');
+});
+test('a man at a window sees further and is harder to see', () => {
+  const w = new World(512, 7, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const house = w.props.find((p) => isGarrisonable(p) && p.floors >= 4);
+  const outside = makeSoldier(w, 'sov', 'rifleman', house.x + 20, house.z);
+  // Fill the lower floors so the next man in goes upstairs.
+  let inside = null;
+  for (let i = 0; i < house.capacity; i++) {
+    const m = makeSoldier(w, 'sov', 'rifleman', house.x, house.z);
+    if (enterBuilding(w, m, house) && (m.garrisonFloor ?? 0) >= 1) inside = m;
+  }
+  w.rebuildHash();
+  assert(inside && inside.garrison != null, 'somebody should end up on an upper floor');
+  assert(eyeHeight(w, inside) > eyeHeight(w, outside) + 1, 'his eyes are higher up');
+  assert(signature(w, inside) < signature(w, outside), 'and he is harder to pick out');
+});
+test('buildings stand up to shellfire but not indefinitely', () => {
+  const w = new World(512, 7, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const house = w.props.find((p) => p.type === 'apartment');
+  const start = house.hp;
+  // A single mortar bomb should barely mark it.
+  explode(w, house.x, 1, house.z, 0.6, WEAPONS.grw34_81, 'ger');
+  assert(house.alive, 'one mortar round does not level a block of flats');
+  assert(house.hp < start, 'but it does do some harm');
+  // A sustained bombardment eventually does.
+  for (let i = 0; i < 60 && house.alive; i++) explode(w, house.x, 1, house.z, 3.6, WEAPONS.d25t_122, 'ger');
+  assert(!house.alive, 'sixty heavy shells should bring it down');
+});
+test('rifle fire does not demolish buildings', () => {
+  const w = new World(512, 7, MAPS.city.terrain);
+  MAPS.city.build(w);
+  const house = w.props.find((p) => p.type === 'apartment');
+  const shooter = makeSoldier(w, 'ger', 'rifleman', house.x, house.z + 40);
+  w.rebuildHash();
+  const before = house.hp;
+  for (let i = 0; i < 200; i++) {
+    fireWeapon(w, shooter, 'kar98k', { x: house.x, y: 1.6, z: house.z + 40 },
+      { x: house.x, y: 4, z: house.z }, { aim: 1, shell: 'bullet' });
+    for (let s = 0; s < 200 && w.projectiles.length; s++) stepProjectiles(w, 1 / 120);
+  }
+  assert(house.alive, 'two hundred rifle rounds should not bring a building down');
+  assert(house.hp > before * 0.9, 'nor take a tenth off it');
+});
+test('a battle in the city plays out and puts men in the windows', () => {
+  const b = new Battle({ seed: 1942, map: 'city' });
+  const red = new Commander(b, b.playerSide);
+  const steps = Math.round((10 * 60) / TICK);
+  for (let i = 0; i < steps && !b.over; i++) { b.step(TICK); red.step(TICK); }
+  const men = b.world.entities.filter((e) => e.kind === 'soldier' && !e.inVehicle);
+  const inside = men.filter((m) => m.garrison != null);
+  assert(b.world.corpses.length > 20, 'a city fight should be costly');
+  assert(inside.length > 3, `only ${inside.length} men took to the buildings`);
+  assert(b.world.log.some((l) => l.tone === 'flag'), 'ground should change hands');
+});
+test('both maps run at well over real time', () => {
+  for (const map of ['countryside', 'city']) {
+    const b = new Battle({ seed: 909, map });
+    const steps = Math.round(60 / TICK);
+    const t0 = Date.now();
+    for (let i = 0; i < steps && !b.over; i++) b.step(TICK);
+    const ratio = 60 / ((Date.now() - t0) / 1000);
+    assert(ratio > 8, `${map} runs at only ${ratio.toFixed(1)}x real time`);
+  }
 });
 
 console.log('\n' + results.join('\n'));

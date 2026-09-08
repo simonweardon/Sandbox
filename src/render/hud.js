@@ -5,6 +5,7 @@ import { KIND } from '../sim/world.js';
 import { WEAPONS } from '../data/weapons.js';
 import { FACTIONS } from '../data/factions.js';
 import { visibleTo } from '../sim/vision.js';
+import { MAPS } from '../sim/maps.js';
 import { fmtRange, clamp } from '../core/util.js';
 
 const el = (tag, cls, text) => {
@@ -82,6 +83,7 @@ export class Hud {
     this.help.innerHTML = HELP_HTML;
     this.help.style.display = 'none';
     r.appendChild(this.help);
+    this.buildMapPicker();
 
     // Shown once, when the battle is decided.
     this.end = el('div', 'hud-end');
@@ -120,11 +122,27 @@ export class Hud {
     this.end.style.display = '';
     this.end.querySelector('.end-again').onclick = () => {
       const seed = Math.floor(Math.random() * 100000);
-      location.search = `?seed=${seed}`;
+      location.search = `?seed=${seed}&map=${this.battle.mapKey}`;
     };
   }
 
   hideEnd() { this.end.style.display = 'none'; }
+
+  /** Choose the battlefield without having to edit the address bar. */
+  buildMapPicker() {
+    const holder = this.help.querySelector('.map-pick');
+    if (!holder) return;
+    for (const [key, m] of Object.entries(MAPS)) {
+      const b = el('button', 'map-opt' + (key === this.battle.mapKey ? ' on' : ''));
+      b.innerHTML = `<b>${m.name}</b><span>${m.blurb}</span>`;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        if (key === this.battle.mapKey) { this.toggleHelp(); return; }
+        location.search = `?seed=${Math.floor(Math.random() * 100000)}&map=${key}`;
+      };
+      holder.appendChild(b);
+    }
+  }
 
   refreshSpeed() {
     for (const b of this.speedBox.children) {
@@ -291,7 +309,9 @@ export class Hud {
 
   soldierCard(s) {
     const w = WEAPONS[s.inv.primary];
-    const stance = ['standing', 'crouched', 'prone'][s.stance];
+    const stance = s.garrison != null
+      ? `at a window, floor ${(s.garrisonFloor ?? 0) + 1}`
+      : ['standing', 'crouched', 'prone'][s.stance];
     return `<div class="card">
       <div class="title">${s.role}${s.leader ? ' (leader)' : ''}</div>
       <div class="sub">${w.name} &middot; ${stance}</div>
@@ -383,6 +403,7 @@ const HELP_HTML = `
 <h2>Direct Control</h2>
 <p>A real-time tactics game in the Men of War mould. Every round fired is a
 simulated projectile; armour is resolved plate by plate; ammunition runs out.</p>
+<div class="map-pick"></div>
 <table>
 <tr><th colspan="2">Command</th></tr>
 <tr><td>Left click / drag</td><td>Select unit or box-select</td></tr>
@@ -391,10 +412,11 @@ simulated projectile; armour is resolved plate by plate; ammunition runs out.</p
 <tr><td>Shift + right click</td><td>Queue the order</td></tr>
 <tr><td>Ctrl + right click</td><td>Attack-move: advance, engaging on the way</td></tr>
 <tr><td>Right click a vehicle</td><td>Get in (Ctrl to crew it)</td></tr>
+<tr><td>Right click a building</td><td>Occupy it and fire from the windows</td></tr>
 <tr><td>1 / 2 / 3</td><td>Stand / crouch / prone</td></tr>
 <tr><td>H</td><td>Hold fire</td></tr>
 <tr><td>X</td><td>Stop</td></tr>
-<tr><td>U</td><td>Get out</td></tr>
+<tr><td>U</td><td>Get out of a vehicle or a building</td></tr>
 <tr><td>Ctrl + 1..9 / 1..9</td><td>Set and recall control groups</td></tr>
 <tr><th colspan="2">Camera</th></tr>
 <tr><td>W A S D / edge</td><td>Pan</td></tr>

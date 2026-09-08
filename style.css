@@ -211,3 +211,15 @@ body {
 }
 .end-again:hover { filter: brightness(1.1); }
 .end-hint { margin-top: 10px; font-size: 9.5px; color: var(--dim); letter-spacing: 0.08em; }
+
+/* ---- map picker ------------------------------------------------------- */
+.map-pick { display: flex; gap: 10px; margin: 4px 0 18px; }
+.map-opt {
+  font: inherit; text-align: left; cursor: pointer; padding: 8px 12px; width: 250px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--edge); border-radius: 4px;
+  color: var(--ink); display: block;
+}
+.map-opt:hover { background: rgba(160, 210, 150, 0.16); border-color: var(--good); }
+.map-opt.on { border-color: var(--good); background: rgba(160, 210, 150, 0.12); }
+.map-opt b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+.map-opt span { display: block; font-size: 10.5px; color: var(--dim); line-height: 1.35; }

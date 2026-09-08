@@ -4,7 +4,8 @@
 // seed regardless of frame rate, with projectiles sub-stepped because an 800
 // m/s shell would otherwise skip straight over a tank between ticks.
 
-import { World, populateScenery, fortifyFlags, KIND } from './world.js';
+import { World, fortifyFlags, KIND } from './world.js';
+import { MAPS, DEFAULT_MAP } from './maps.js';
 import { NavGrid } from './pathfinding.js';
 import { stepMovement, issueOrder, ORDER } from './orders.js';
 import { stepCombat } from './combat.js';
@@ -29,8 +30,10 @@ export class Battle {
     this.size = opts.size ?? 512;
     this.playerSide = opts.player ?? 'sov';
     this.enemySide = opts.enemy ?? 'ger';
-    this.world = new World(this.size, this.seed);
-    populateScenery(this.world);
+    this.mapKey = MAPS[opts.map] ? opts.map : DEFAULT_MAP;
+    this.map = MAPS[this.mapKey];
+    this.world = new World(this.size, this.seed, this.map.terrain);
+    this.map.build(this.world);
 
     this.sides = {};
     for (const side of [this.playerSide, this.enemySide]) {
@@ -53,18 +56,14 @@ export class Battle {
 
   sideName(side) { return FACTIONS[side]?.name ?? side; }
 
-  /** Five flags down the middle of the map, one line of contest. */
+  /** Five objectives down the middle of the map, one line of contest. */
   layFlags() {
     const S = this.size, w = this.world;
-    const names = ['Bridgehead', 'The Farm', 'Crossroads', 'The Mill', 'Rail Halt'];
-    const lay = [
-      { u: 0.5, v: 0.14, owner: this.playerSide },
-      { u: 0.26, v: 0.36, owner: 'neu' },
-      { u: 0.52, v: 0.5, owner: 'neu' },
-      { u: 0.74, v: 0.64, owner: 'neu' },
-      { u: 0.5, v: 0.86, owner: this.enemySide },
-    ];
-    lay.forEach((f, i) => w.addFlag(f.u * S, f.v * S, f.owner, names[i], i === 2 ? 26 : 22));
+    const lay = this.map.flags;
+    lay.forEach((f, i) => {
+      const owner = i === 0 ? this.playerSide : (i === lay.length - 1 ? this.enemySide : 'neu');
+      w.addFlag(f.u * S, f.v * S, owner, f.name, f.r ?? 22);
+    });
   }
 
   spawnPointFor(side) {

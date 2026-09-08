@@ -28,7 +28,8 @@ So this is not a copy of the game. It is a working recreation of how the game
 | Suppression, morale, stance and cover | `src/sim/damage.js`, `src/sim/orders.js` |
 | Fog of war driven by what a unit is doing, not a flat radius | `src/sim/vision.js` |
 | Objectives, manpower and reinforcement call-ins | `src/sim/capture.js` |
-| Destructible scenery that tanks flatten and shells knock down | `src/sim/world.js` |
+| Destructible scenery that tanks flatten and shells knock down | `src/sim/maps.js` |
+| Occupying buildings and fighting from the windows | `src/sim/garrison.js` |
 
 ## The bit that matters: armour
 
@@ -77,6 +78,40 @@ Measured hit rates come out at about 87% at 300 m, 55% at 800 m and 20% at
 1500 m for a 7.5 cm KwK 40 against a T-34 — which is roughly what the wartime
 range tables promised.
 
+## Two battlefields
+
+Pick one on the opening screen, or with `?map=city` in the address.
+
+**Rolling farmland.** Open ground, long sightlines, hedges and copses. Armour
+in its element: a Tiger sitting in a treeline commands everything it can see,
+which is most of the map, and infantry cross the open at their peril.
+
+**The city.** A street grid of apartment blocks, ruins, a factory hall and a
+square, laid over ground somebody once levelled. It is a completely different
+battle. Nothing sees past about fifty metres. Armour cannot leave the street,
+and every window it drives past might hold somebody with a Panzerfaust. The
+objectives are landmarks — the grain elevator, the tractor works, the rail
+yard — and they change hands room by room.
+
+### Buildings are the ground you fight over
+
+Right-click a building with infantry selected and they go inside, spreading up
+the floors and taking a window each. From there they:
+
+- **see further**, because they are looking out of a fourth-floor window rather
+  than standing in the street
+- **are much harder to see**, and much harder to hit — a window frame is the
+  best cover on the map short of armour
+- **only cover the arc their window faces**, so a building has blind sides
+- **cannot be shifted by rifle fire.** Two hundred rounds will not take a tenth
+  off a block of flats. It takes high explosive, and a lot of it: about sixty
+  122 mm shells to bring one down, at which point everyone inside goes with it
+  bar the few who get clear
+
+Press `U` to turn them out again. The enemy commander does the same thing —
+about two fifths of every formation it takes ground with stays behind to hold
+the buildings overlooking it, which is why taking a block off it is slow work.
+
 ## Playing it
 
 Press **F1** for the controls at any time.
@@ -110,8 +145,11 @@ src/
   core/          seeded RNG and maths
   data/          33 weapons, 17 vehicles, 4 towed guns, squads, factions
   sim/           the game, headless — runs with no renderer at all
-    terrain.js       heightfield, roads, terrain-masking line of sight
+    terrain.js       heightfield, country lanes or a city street grid
+    maps.js          the two battlefields and what fills them
+    shapes.js        prop footprints — a building is a box, not a circle
     world.js         entities, destructible scenery, cover, objectives
+    garrison.js      occupying buildings and firing from the windows
     penetration.js   facet selection, slope, overmatch, ricochet
     ballistics.js    drag-aware trajectories and the gun-laying solver
     damage.js        spalling, components, crew, fire, blast
@@ -165,12 +203,17 @@ AI's judgement about what it can hurt — reads those numbers.
 **A squad.** Add a template to `SQUADS` in `src/data/infantry.js` listing the
 roles in it, and a kit per role in `KITS`.
 
+**A map.** Add an entry to `MAPS` in `src/sim/maps.js`: how the terrain should
+be generated, a function that fills it with scenery, and where the five
+objectives go. Everything else — pathfinding, line of sight, the AI's sense of
+where to go — reads the world that function builds.
+
 ## Running it
 
 ```
 npm start            # serve on :3000
-npm test             # 34 tests of the simulation, no browser needed
-npm run test:browser # 25 more, driving the real interface with mouse and keys
+npm test             # 47 tests of the simulation, no browser needed
+npm run test:browser # 37 more, driving the real interface with mouse and keys
 ```
 
 No build step and no install: the only dependency is three.js, vendored under

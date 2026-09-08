@@ -9,7 +9,10 @@ const DIRT = 0x6d5f45;
 const ROAD = 0x77705f;
 const MUD = 0x4e4335;
 const SAND = 0x9a8b66;
-const RUBBLE = 0x6a6660;
+/** Brick dust and broken plaster trodden flat. */
+const RUBBLE = [0x7a6a5c, 0x6e6157, 0x836f5e];
+/** Asphalt, greyer and colder than a country road. */
+const PAVING = 0x5e5e5c;
 
 export function buildTerrainMesh(terrain) {
   const n = terrain.n;
@@ -30,10 +33,11 @@ export function buildTerrainMesh(terrain) {
     const g = terrain.groundAt(x, z);
     let base;
     if (g === GROUND.ROAD) base = ROAD;
+    else if (g === GROUND.PAVING) base = PAVING;
     else if (g === GROUND.DIRT) base = DIRT;
     else if (g === GROUND.MUD) base = MUD;
     else if (g === GROUND.SAND) base = SAND;
-    else if (g === GROUND.RUBBLE) base = RUBBLE;
+    else if (g === GROUND.RUBBLE) base = RUBBLE[Math.floor(hashNoise(x * 0.53 + z * 0.29) * RUBBLE.length) % RUBBLE.length];
     else base = GRASS[Math.floor(hashNoise(x * 0.37 + z * 0.71) * GRASS.length) % GRASS.length];
 
     c.setHex(base);

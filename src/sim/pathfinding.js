@@ -7,6 +7,7 @@
 
 import { CELL, GROUND_SPEED } from './terrain.js';
 import { clamp } from '../core/util.js';
+import { propDistance, propReach, isBoxed } from './shapes.js';
 
 export const NAV_CELL = 4;
 const BLOCKED = 255;
@@ -42,19 +43,24 @@ export class NavGrid {
   /** Write one prop's footprint into the cost grids. */
   stamp(p) {
     if (!p.alive || !p.blocksMove) return;
-    const r = Math.ceil((p.radius + 1) / NAV_CELL);
+    const reach = propReach(p);
+    const r = Math.ceil((reach + 1) / NAV_CELL);
     const ci = this.toCell(p.x), cj = this.toCell(p.z);
     // A tank drives through hedges, fences and saplings; it does not drive
     // through a house, a wall or a boulder.
     const crushable = p.type === 'fence' || p.type === 'hedge' || p.type === 'tree';
+    const solid = p.type === 'house' || p.type === 'apartment' || p.type === 'factory'
+      || p.type === 'ruin' || p.type === 'wall' || p.type === 'monument';
     for (let j = cj - r; j <= cj + r; j++) {
       for (let i = ci - r; i <= ci + r; i++) {
         if (i < 0 || j < 0 || i >= this.n || j >= this.n) continue;
-        const d = Math.hypot(i * NAV_CELL - p.x, j * NAV_CELL - p.z);
-        if (d > p.radius + 1.2) continue;
+        // Distance to the footprint itself, so a long building blocks its own
+        // ground and leaves the street beside it open.
+        const d = propDistance(p, i * NAV_CELL, j * NAV_CELL);
+        if (d > 1.2) continue;
         const k = this.idx(i, j);
-        const inner = d < p.radius * 0.75;
-        if (inner) this.footCost[k] = p.type === 'house' ? BLOCKED : Math.min(BLOCKED, this.footCost[k] + 40);
+        const inner = d <= 0.001;
+        if (inner) this.footCost[k] = solid ? BLOCKED : Math.min(BLOCKED, this.footCost[k] + 40);
         else this.footCost[k] = Math.min(BLOCKED - 1, this.footCost[k] + 18);
         if (crushable) this.tankCost[k] = Math.min(BLOCKED - 1, this.tankCost[k] + (inner ? 26 : 10));
         else this.tankCost[k] = BLOCKED;
@@ -64,7 +70,7 @@ export class NavGrid {
 
   /** Called when scenery is knocked down, so paths open up mid-battle. */
   clearProp(p) {
-    const r = Math.ceil((p.radius + 1) / NAV_CELL);
+    const r = Math.ceil((propReach(p) + 1) / NAV_CELL);
     const ci = this.toCell(p.x), cj = this.toCell(p.z);
     const T = this.world.terrain;
     for (let j = cj - r; j <= cj + r; j++) {
@@ -81,7 +87,7 @@ export class NavGrid {
     // Anything still standing nearby has to be written back in.
     for (const q of this.world.props) {
       if (!q.alive || q === p) continue;
-      if (Math.hypot(q.x - p.x, q.z - p.z) < q.radius + p.radius + NAV_CELL * 2) this.stamp(q);
+      if (Math.hypot(q.x - p.x, q.z - p.z) < propReach(q) + propReach(p) + NAV_CELL * 2) this.stamp(q);
     }
   }
 
@@ -106,23 +112,36 @@ const NEIGHBOURS = [
  */
 export function findPath(nav, ax, az, bx, bz, tank = false, maxNodes = 24000) {
   const n = nav.n;
-  const si = nav.toCell(ax), sj = nav.toCell(az);
+  let si = nav.toCell(ax), sj = nav.toCell(az);
   let gi = nav.toCell(bx), gj = nav.toCell(bz);
 
-  // If the goal is inside something solid, aim for the nearest cell that is not.
-  if (nav.costAt(gi, gj, tank) >= BLOCKED) {
-    let found = null;
-    for (let r = 1; r <= 6 && !found; r++) {
-      for (let j = gj - r; j <= gj + r && !found; j++) {
-        for (let i = gi - r; i <= gi + r; i++) {
+  /** The nearest cell that is not inside something solid. */
+  const escape = (ci, cj) => {
+    for (let r = 1; r <= 8; r++) {
+      for (let j = cj - r; j <= cj + r; j++) {
+        for (let i = ci - r; i <= ci + r; i++) {
           if (i < 0 || j < 0 || i >= n || j >= n) continue;
-          if (Math.max(Math.abs(i - gi), Math.abs(j - gj)) !== r) continue;
-          if (nav.costAt(i, j, tank) < BLOCKED) { found = [i, j]; break; }
+          if (Math.max(Math.abs(i - ci), Math.abs(j - cj)) !== r) continue;
+          if (nav.costAt(i, j, tank) < BLOCKED) return [i, j];
         }
       }
     }
+    return null;
+  };
+
+  // If the goal is inside something solid, aim for the nearest cell that is not.
+  if (nav.costAt(gi, gj, tank) >= BLOCKED) {
+    const found = escape(gi, gj);
     if (!found) return null;
     [gi, gj] = found;
+  }
+  // Same for the start: a man who has just stepped out of a building, or a
+  // tank whose cell was blocked by rubble dropped on it, still has to be able
+  // to work out where to go.
+  if (nav.costAt(si, sj, tank) >= BLOCKED) {
+    const found = escape(si, sj);
+    if (!found) return null;
+    [si, sj] = found;
   }
   if (si === gi && sj === gj) return [{ x: bx, z: bz }];
 

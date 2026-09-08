@@ -8,6 +8,7 @@
 
 import { KIND } from './world.js';
 import { STANCE, STANCE_EXPOSURE, disembark, vehicleManned } from './units.js';
+import { garrisonProtection, occupants, leaveBuilding } from './garrison.js';
 import { WEAPONS, blastRadius, blastDamage, SHELL } from '../data/weapons.js';
 import { RESULT } from './penetration.js';
 import { roll } from '../core/rng.js';
@@ -276,7 +277,8 @@ export function explode(world, x, y, z, kgTnt, weapon, faction, source = null) {
     let dmg = blastDamage(kgTnt, d);
     if (dmg <= 0) { e.suppression = clamp(e.suppression + 0.3, 0, 1.6); continue; }
     dmg *= STANCE_EXPOSURE[e.stance];
-    const cover = world.coverAt(e.x, e.z, x, z);
+    // Walls are worth far more against blast than a hedge is.
+    const cover = Math.max(world.coverAt(e.x, e.z, x, z), garrisonProtection(world, e));
     dmg *= 1 - cover * 0.55;
     e.suppression = clamp(e.suppression + 0.9, 0, 1.6);
     e.morale = clamp(e.morale - 0.12, 0, 1);
@@ -332,11 +334,12 @@ export function breakProp(world, p) {
   p.cover = p.type === 'house' ? 0.5 : 0.15;
   p.rubble = true;
   world.fx('propBreak', { x: p.x, y: p.y, z: p.z, type: p.type, radius: p.radius });
-  if (p.type === 'house') {
-    world.logLine('A building collapses', 'info');
-    // Anyone inside goes with it.
-    for (const e of world.near(p.x, p.z, p.radius, (u) => u.kind === KIND.SOLDIER)) {
-      if (e.garrison === p.id) damageSoldier(world, e, 140, 'collapse');
+  if (p.capacity > 0) {
+    world.logLine(`${p.type === 'factory' ? 'The factory hall' : 'A building'} collapses`, 'warn');
+    // Anybody still at the windows goes down with it; a few get clear.
+    for (const e of occupants(world, p)) {
+      if (roll() < 0.25) { leaveBuilding(world, e); e.suppression = 1.4; e.morale = 0.25; }
+      else damageSoldier(world, e, 160, 'collapse');
     }
   }
 }

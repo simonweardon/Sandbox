@@ -12,6 +12,8 @@ import { SQUADS } from '../data/infantry.js';
 import { VEHICLES, GUNS } from '../data/vehicles.js';
 import { FACTIONS } from '../data/factions.js';
 import { visibleTo } from './vision.js';
+import { isGarrisonable, garrisonCount, buildingAt } from './garrison.js';
+import { ORDER as O } from './orders.js';
 import { roll } from '../core/rng.js';
 import { clamp, dist } from '../core/util.js';
 
@@ -126,22 +128,79 @@ export class Commander {
     return best;
   }
 
+  /** A building overlooking the objective that still has room in it. */
+  buildingNear(flag, u) {
+    const world = this.battle.world;
+    let best = null, bestScore = Infinity;
+    for (const p of world.propsNearPoint(flag.x, flag.z, flag.radius + 34)) {
+      if (!isGarrisonable(p)) continue;
+      if (garrisonCount(world, p) >= p.capacity) continue;
+      const d = dist(p.x, p.z, flag.x, flag.z) + dist(p.x, p.z, u.x, u.z) * 0.4;
+      if (d < bestScore) { bestScore = d; best = p; }
+    }
+    return best;
+  }
+
+  /**
+   * Take charge of anything of ours that nobody is commanding — in particular
+   * the force we started the battle with, which is created before the first
+   * purchase and would otherwise stand at the start line for the whole game.
+   */
+  adopt() {
+    const b = this.battle;
+    const held = new Set();
+    for (const g of this.groups) for (const u of g.units) held.add(u.id);
+    const loose = b.world.entities.filter((e) => e.faction === this.side
+      && e.id !== undefined && !held.has(e.id)
+      && (e.kind === KIND.SOLDIER ? !e.inVehicle : true)
+      && e.kind !== KIND.PROP
+      && !(e.kind === KIND.VEHICLE && (e.destroyed || e.abandoned))
+      && !(e.kind === KIND.GUN && e.destroyed));
+    if (!loose.length) return;
+
+    // Group them by what they are, so infantry and armour get their own tasks.
+    const foot = loose.filter((e) => e.kind === KIND.SOLDIER);
+    const armour = loose.filter((e) => e.kind === KIND.VEHICLE);
+    const guns = loose.filter((e) => e.kind === KIND.GUN);
+    for (const [units, kind] of [[foot, 'infantry'], [armour, 'armour'], [guns, 'gun']]) {
+      if (!units.length) continue;
+      const objective = this.chooseObjective({ units });
+      this.groups.push({ units, objective, kind });
+      if (kind === 'gun' || !objective) continue;
+      for (const u of units) {
+        issueOrder(b, u, {
+          type: ORDER.ATTACK_MOVE,
+          x: objective.x + (roll() - 0.5) * 20, z: objective.z + (roll() - 0.5) * 20,
+        });
+      }
+    }
+  }
+
   /** Keep the groups moving, and pull back the ones that are spent. */
   think() {
     const b = this.battle, world = b.world;
+    this.adopt();
     this.groups = this.groups.filter((g) => {
       g.units = g.units.filter((u) => u.alive && !(u.kind === KIND.VEHICLE && (u.destroyed || u.abandoned)) && !u.destroyed);
       return g.units.length > 0;
     });
 
     for (const g of this.groups) {
-      // Objective taken, or lost — find another.
+      // Objective taken, or lost — find another. Part of the group stays to
+      // hold what was just won, because ground nobody is standing on is ground
+      // you have not taken.
       if (!g.objective || g.objective.owner === this.side) {
+        if (!g.holdAssigned) {
+          g.holdAssigned = true;
+          const keep = Math.max(1, Math.round(g.units.length * 0.4));
+          g.units.slice(0, keep).forEach((u) => { u.holdHere = g.objective; });
+        }
         const next = this.chooseObjective(g);
         if (!next || next === g.objective) continue;
         g.objective = next;
+        g.holdAssigned = false;
         for (const u of g.units) {
-          if (u.kind === KIND.GUN) continue;
+          if (u.kind === KIND.GUN || u.holdHere) continue;
           issueOrder(b, u, { type: ORDER.ATTACK_MOVE, x: next.x + (roll() - 0.5) * 16, z: next.z + (roll() - 0.5) * 16 });
         }
         continue;
@@ -150,13 +209,25 @@ export class Commander {
       for (const u of g.units) {
         if (u.kind === KIND.GUN) continue;
         const near = dist(u.x, u.z, g.objective.x, g.objective.z) < g.objective.radius * 1.2;
-        if (near && u.orders.length === 0) {
+        // On a map with buildings, holding ground means holding the buildings
+        // overlooking it, not standing in the open beside the flag.
+        const holding = u.holdHere || near;
+        if (holding && u.kind === KIND.SOLDIER && u.garrison == null
+            && u.state !== 'entering' && roll() < (u.holdHere ? 0.9 : 0.5)) {
+          const house = this.buildingNear(u.holdHere || g.objective, u);
+          if (house) {
+            issueOrder(b, u, { type: O.GARRISON, propId: house.id, x: house.x, z: house.z });
+            continue;
+          }
+        }
+        if (u.holdHere && u.garrison != null) continue;   // he is in position
+        if (near && u.orders.length === 0 && u.garrison == null) {
           issueOrder(b, u, { type: ORDER.CAPTURE, x: g.objective.x + (roll() - 0.5) * 10, z: g.objective.z + (roll() - 0.5) * 10 });
-        } else if (!near && u.orders.length === 0) {
+        } else if (!near && u.orders.length === 0 && u.garrison == null) {
           issueOrder(b, u, { type: ORDER.ATTACK_MOVE, x: g.objective.x + (roll() - 0.5) * 16, z: g.objective.z + (roll() - 0.5) * 16 });
         }
         // Men under fire get down; men who are safe get up and move.
-        if (u.kind === KIND.SOLDIER) {
+        if (u.kind === KIND.SOLDIER && u.garrison == null) {
           if (u.suppression > 0.5) u.stance = u.suppression > 0.9 ? 2 : 1;
           else if (u.stance !== 0 && u.orders.length && roll() < 0.6) u.stance = 0;
         }

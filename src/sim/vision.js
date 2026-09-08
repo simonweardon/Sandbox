@@ -23,6 +23,8 @@ export function signature(world, u) {
   }
   if (u.kind === KIND.GUN) return world.time - (u.lastFired ?? -99) < 4 ? 2.0 : 0.8;
   let s = [1.0, 0.62, 0.34][u.stance] ?? 1;
+  // Somebody at a window is harder to pick out than somebody in the street.
+  if (u.garrison != null) s *= 0.55;
   if (u.moving) s *= 1.7;
   if (world.time - (u.lastFired ?? -99) < 2.5) s += 0.9;   // muzzle flash
   s *= 1 - (u.stealth || 0) * 0.5;
@@ -30,6 +32,8 @@ export function signature(world, u) {
 }
 
 export function eyeHeight(world, u) {
+  // A man at a fourth-floor window sees from the fourth floor.
+  if (u.garrison != null) return u.y + STANCE_HEIGHT[u.stance] * 0.88;
   const g = world.terrain.heightAt(u.x, u.z);
   if (u.kind === KIND.VEHICLE) return g + u.proxy.height * 0.85;
   if (u.kind === KIND.GUN) return g + 1.1;
@@ -37,10 +41,16 @@ export function eyeHeight(world, u) {
 }
 
 export function targetHeight(world, u) {
+  if (u.garrison != null) return u.y + STANCE_HEIGHT[u.stance] * 0.55;
   const g = world.terrain.heightAt(u.x, u.z);
   if (u.kind === KIND.VEHICLE) return g + u.proxy.height * 0.55;
   if (u.kind === KIND.GUN) return g + 0.8;
   return g + STANCE_HEIGHT[u.stance] * 0.55;
+}
+
+/** The building a unit is shooting from or at, which its own line ignores. */
+export function ownBuilding(world, u) {
+  return u && u.garrison != null ? world.propsById?.get(u.garrison) ?? null : null;
 }
 
 /**
@@ -57,7 +67,8 @@ export function canSee(world, watcher, quarry) {
   const detect = range * clamp(sig / 2.2, 0.18, 1.6);
   if (d > detect) return false;
   const ey = eyeHeight(world, watcher), ty = targetHeight(world, quarry);
-  return !world.losBlocker(watcher.x, ey, watcher.z, quarry.x, ty, quarry.z);
+  return !world.losBlocker(watcher.x, ey, watcher.z, quarry.x, ty, quarry.z,
+    ownBuilding(world, watcher), ownBuilding(world, quarry));
 }
 
 export function spotRange(world, u) {
@@ -110,7 +121,8 @@ export function stepVision(world, dt, slices = 6) {
       if (d2 > range * range) continue;
       const detect = range * clamp(sig / 2.2, 0.18, 1.6);
       if (d2 > detect * detect) continue;
-      if (world.losBlocker(watcher.x, eyeHeight(world, watcher), watcher.z, u.x, ty, u.z)) continue;
+      if (world.losBlocker(watcher.x, eyeHeight(world, watcher), watcher.z, u.x, ty, u.z,
+        ownBuilding(world, watcher), ownBuilding(world, u))) continue;
       spotted[watcher.faction] = 1;
       u.lastSeen = u.lastSeen || {};
       u.lastSeen[watcher.faction] = { x: u.x, z: u.z, t: world.time };

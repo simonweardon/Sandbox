@@ -17,13 +17,16 @@ import { DEG } from './core/util.js';
 import { VEHICLES, GUNS } from './data/vehicles.js';
 import { makeVehicle, makeGun, makeSquad, disembark } from './sim/units.js';
 import { Commander } from './sim/ai.js';
+import * as garrisonMod from './sim/garrison.js';
 
 const canvas = document.getElementById('view');
 const overlay = document.getElementById('hud');
 const marquee = document.getElementById('marquee');
 
-const seed = Number(new URLSearchParams(location.search).get('seed')) || (Date.now() % 100000);
-const battle = new Battle({ seed, size: 512, player: 'sov', enemy: 'ger' });
+const params = new URLSearchParams(location.search);
+const seed = Number(params.get('seed')) || (Date.now() % 100000);
+const mapKey = params.get('map') || 'countryside';
+const battle = new Battle({ seed, size: 512, player: 'sov', enemy: 'ger', map: mapKey });
 
 const renderer = createRenderer(canvas);
 const { scene, sun } = createScene(battle.size);
@@ -151,7 +154,10 @@ function issueOrderAt(e) {
     asCrew: e.ctrlKey,
   });
   if (label) {
-    hud.say(label === 'attack' ? 'Engaging' : label === 'board' ? 'Mounting up' : label === 'capture' ? 'Taking the objective' : 'Moving');
+    hud.say({
+      attack: 'Engaging', board: 'Mounting up', capture: 'Taking the objective',
+      garrison: 'Occupying the building', 'attack-move': 'Advancing',
+    }[label] || 'Moving');
     effects.addDecal(point.x, point.z, 1.6, 0.35);
   }
 }
@@ -207,9 +213,9 @@ addEventListener('keydown', (e) => {
     case 'KeyH': hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'); break;
     case 'KeyX': selection.stop(); hud.say('Stop'); break;
     case 'KeyU': {
-      // Everybody out: passengers first, then the crew, so a half-track empties
-      // its section without also abandoning itself unless that is what you meant.
-      let out = 0;
+      // Everybody out: men at windows, then passengers, then the crew, so a
+      // half-track empties its section without abandoning itself unless meant.
+      let out = selection.dismount();
       for (const u of selection.units) {
         if (u.kind !== KIND.VEHICLE) continue;
         const aboard = [...u.passengers, ...u.crew.map((c) => c.occupant)].filter(Boolean);
@@ -220,7 +226,7 @@ addEventListener('keydown', (e) => {
           out++;
         }
       }
-      hud.say(out ? `${out} dismounted` : 'Nobody aboard');
+      hud.say(out ? `${out} dismounted` : 'Nobody aboard or inside');
       break;
     }
     case 'F1': hud.toggleHelp(); e.preventDefault(); break;
@@ -291,6 +297,7 @@ requestAnimationFrame(frame);
 // browser console: lay out one of every vehicle, fast-forward a battle, or
 // take a unit under direct control without touching the interface.
 window.game = { battle, view, effects, rig, selection, direct, hud, scene, renderer, camera, THREE };
+window.__gar = garrisonMod;
 window.game.spawn = {
   vehicles: VEHICLES,
   guns: GUNS,

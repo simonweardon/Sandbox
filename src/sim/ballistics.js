@@ -12,6 +12,8 @@ import { damageSoldier, applySpall, evaluateVehicle, explode, suppressNear, brea
 import { STANCE_EXPOSURE, STANCE_HEIGHT } from './units.js';
 import { roll } from '../core/rng.js';
 import { clamp, DEG, pointSegDist2 } from '../core/util.js';
+import { propSegmentT } from './shapes.js';
+import { garrisonProtection } from './garrison.js';
 
 const GRAVITY = 9.81;
 /** Very rough drag: shells hold velocity far better than pistol rounds. */
@@ -252,15 +254,16 @@ function traceSegment(world, p) {
   // Scenery: trees stop bullets, walls stop most things.
   for (const prop of world.propsNearSegment(ax, az, bx, bz, 8)) {
     if (!prop.alive || !prop.blocksMove) continue;
-    const d2 = pointSegDist2(prop.x, prop.z, ax, az, bx, bz);
-    const r = prop.type === 'house' ? prop.radius : prop.radius * 0.6;
-    if (d2 > r * r) continue;
-    const segLen2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
-    const t = clamp(((prop.x - ax) * (bx - ax) + (prop.z - az) * (bz - az)) / segLen2, 0, 1);
+    // Trees and posts are narrower than their spatial radius suggests; a
+    // building is exactly as wide as its walls.
+    const shrink = prop.w ? 0 : -prop.radius * 0.4;
+    const t = propSegmentT(prop, ax, az, bx, bz, shrink);
+    if (t === null || t >= bestT) continue;
     const y = p.py + (p.y - p.py) * t;
     const base = world.terrain.heightAt(prop.x, prop.z);
     if (y < base || y > base + prop.height) continue;
-    if (t < bestT) { bestT = t; best = { prop, t, x: ax + (bx - ax) * t, y, z: az + (bz - az) * t }; }
+    bestT = t;
+    best = { prop, t, x: ax + (bx - ax) * t, y, z: az + (bz - az) * t };
   }
   return best;
 }
@@ -279,8 +282,9 @@ function hitSoldier(world, p, hit, s) {
     burst(world, p, hit.x, hit.y, hit.z, s);
     return;
   }
-  // Cover can stop a round short of the man behind it.
-  const cover = world.coverAt(s.x, s.z, p.px, p.pz);
+  // Cover can stop a round short of the man behind it. A window frame is the
+  // best cover on the map, short of armour.
+  const cover = Math.max(world.coverAt(s.x, s.z, p.px, p.pz), garrisonProtection(world, s));
   if (cover > 0 && roll() < cover * 0.75) {
     world.fx('impact', { x: hit.x, y: hit.y, z: hit.z, kind: 'dirt' });
     return;
@@ -390,7 +394,12 @@ function hitProp(world, p, hit) {
     burst(world, p, hit.x, hit.y, hit.z, null);
     return;
   }
-  prop.hp -= w.damage * 0.5 + w.caliber * 0.8;
+  // Rifle fire chips plaster off a building; it does not bring one down.
+  // Only something with real explosive or a heavy shell does structural harm.
+  const structural = prop.capacity > 0 || prop.type === 'wall' || prop.type === 'monument';
+  prop.hp -= structural && w.caliber < 20
+    ? (w.damage * 0.02)
+    : (w.damage * 0.5 + w.caliber * 0.8);
   world.fx('impact', { x: hit.x, y: hit.y, z: hit.z, kind: prop.type === 'house' ? 'dust' : 'splinter' });
   if (prop.hp <= 0) breakProp(world, prop);
   // A big shell keeps going through a fence or a hedge.

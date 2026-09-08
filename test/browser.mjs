@@ -349,6 +349,50 @@ check('the speed buttons still take clicks', (await state(() => window.game.batt
   check('geometries stay bounded too', mem.geoms < 400, `${mem.geoms} geometries`);
 }
 
+// ---- the city map loads, is playable, and fills its windows ----------------
+{
+  await page.goto(`http://localhost:${PORT}/?seed=1942&map=city`, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForTimeout(1600);
+  const city = await state(() => {
+    const g = window.game, w = g.battle.world;
+    g.hud.help.style.display = 'none';
+    const red = g.spawn.commander(g.battle.playerSide);
+    g.battle.paused = true;
+    for (let i = 0; i < 30 * 60 * 8 && !g.battle.over; i++) { g.battle.step(1 / 30); red.step(1 / 30); }
+    g.battle.paused = false;
+    const men = w.entities.filter((e) => e.kind === 'soldier' && !e.inVehicle);
+    return {
+      map: g.battle.mapKey,
+      buildings: w.props.filter((p) => p.capacity > 0).length,
+      men: men.length,
+      atWindows: men.filter((m) => m.garrison != null).length,
+      dead: w.corpses.length,
+      calls: g.renderer.info.render.calls,
+    };
+  });
+  check('the city map loads', city.map === 'city' && city.buildings > 80, JSON.stringify(city));
+  check('men take to the buildings in a city fight', city.atWindows > 3,
+    `${city.atWindows} of ${city.men} at windows`);
+  check('a city fight is costly', city.dead > 20, `${city.dead} dead`);
+  await page.waitForTimeout(1200);
+  check('and it still draws in a sane number of calls', city.calls < 900, `${city.calls} draw calls`);
+
+  // Right-clicking a building is an order to occupy it.
+  const occupied = await state(() => {
+    const g = window.game, w = g.battle.world;
+    const men = w.entities.filter((e) => e.kind === 'soldier'
+      && e.faction === g.battle.playerSide && !e.inVehicle && e.garrison == null).slice(0, 4);
+    if (!men.length) return -1;
+    g.selection.set(men);
+    const house = w.propsNearPoint(men[0].x, men[0].z, 120)
+      .find((p) => p.capacity >= 4 && p.alive);
+    if (!house) return -2;
+    g.selection.order({ x: house.x, z: house.z }, null, {});
+    return men.filter((m) => m.orders[0]?.type === 'garrison').length;
+  });
+  check('right-clicking a building orders men into it', occupied > 0, `${occupied} ordered in`);
+}
+
 await page.screenshot({ path: path.join(ROOT, 'test', 'browser-final-frame.png') });
 await browser.close();
 stop();

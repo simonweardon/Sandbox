@@ -11,19 +11,25 @@ import { clamp, lerp, smoothstep } from '../core/util.js';
 export const CELL = 4;            // metres per heightfield cell
 
 export const GROUND = {
-  GRASS: 0, DIRT: 1, ROAD: 2, MUD: 3, SAND: 4, RUBBLE: 5,
+  GRASS: 0, DIRT: 1, ROAD: 2, MUD: 3, SAND: 4, RUBBLE: 5, PAVING: 6,
 };
 
-/** Movement cost multipliers by ground type — road is fast, mud is not. */
-export const GROUND_SPEED = [0.82, 0.9, 1.0, 0.5, 0.75, 0.6];
+/** Movement cost multipliers by ground type — road is fast, rubble is not. */
+export const GROUND_SPEED = [0.82, 0.9, 1.0, 0.5, 0.75, 0.6, 1.0];
 
 export class Terrain {
-  constructor(sizeM, seed) {
+  /**
+   * `opts.relief` scales the hills: 1 for open country, a fifth of that for a
+   * city, which is built on ground somebody once levelled.
+   * `opts.roads` is 'lanes' for a couple of country roads, 'grid' for streets.
+   */
+  constructor(sizeM, seed, opts = {}) {
     this.size = sizeM;
     this.n = Math.floor(sizeM / CELL) + 1;
     this.height = new Float32Array(this.n * this.n);
     this.ground = new Uint8Array(this.n * this.n);
     this.seed = seed;
+    this.opts = { relief: 1, roads: 'lanes', ground: 'field', pitch: 74, street: 16, ...opts };
     this.generate(seed);
   }
 
@@ -49,8 +55,9 @@ export class Terrain {
       };
     };
 
-    const o1 = octave(26, 9.0, 0.3), o2 = octave(11, 3.2, 5.1);
-    const o3 = octave(5, 1.1, 11.7), o4 = octave(2.5, 0.35, 23.3);
+    const k = this.opts.relief;
+    const o1 = octave(26, 9.0 * k, 0.3), o2 = octave(11, 3.2 * k, 5.1);
+    const o3 = octave(5, 1.1 * k, 11.7), o4 = octave(2.5, 0.35 * k, 23.3);
 
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
@@ -60,14 +67,57 @@ export class Terrain {
         const edgeFlat = Math.min(smoothstep(clamp(t / 0.18, 0, 1)), smoothstep(clamp((1 - t) / 0.18, 0, 1)));
         h *= 0.35 + 0.65 * edgeFlat;
         this.height[this.idx(i, j)] = h;
-        this.ground[this.idx(i, j)] = rng() < 0.08 ? GROUND.DIRT : GROUND.GRASS;
+        // A city is not a lawn: bare earth, brick dust and weeds coming
+        // through, with grass only where nobody has been for a while.
+        this.ground[this.idx(i, j)] = this.opts.ground === 'urban'
+          ? (rng() < 0.2 ? GROUND.RUBBLE : (rng() < 0.16 ? GROUND.GRASS : GROUND.DIRT))
+          : (rng() < 0.08 ? GROUND.DIRT : GROUND.GRASS);
       }
     }
 
     this.roads = [];
-    this.carveRoad([[0.5, 0.0], [0.46, 0.3], [0.55, 0.55], [0.5, 1.0]], 7);
-    this.carveRoad([[0.0, 0.62], [0.35, 0.58], [0.7, 0.66], [1.0, 0.6]], 6);
+    if (this.opts.roads === 'grid') this.carveGrid();
+    else if (this.opts.roads !== 'none') {
+      this.carveRoad([[0.5, 0.0], [0.46, 0.3], [0.55, 0.55], [0.5, 1.0]], 7);
+      this.carveRoad([[0.0, 0.62], [0.35, 0.58], [0.7, 0.66], [1.0, 0.6]], 6);
+    }
     this.smooth(1);
+  }
+
+  /**
+   * A street grid. Returns the block rectangles between the streets, which is
+   * what the city builder fills with buildings.
+   */
+  carveGrid() {
+    const { pitch, street } = this.opts;
+    const S = this.size;
+    const lines = [];
+    for (let v = pitch * 0.5; v < S; v += pitch) lines.push(v);
+    // One avenue, wider than the rest, running the length of the map.
+    this.avenue = lines[Math.floor(lines.length / 2)];
+
+    for (const v of lines) {
+      const wide = v === this.avenue;
+      const u = v / S;
+      this.carveRoad([[u, 0], [u, 1]], (wide ? street * 1.5 : street) / 2);
+      this.carveRoad([[0, u], [1, u]], (wide ? street * 1.5 : street) / 2);
+    }
+
+    // The open ground between the streets, for the builder to fill.
+    this.blocks = [];
+    const edges = [0, ...lines, S];
+    for (let j = 0; j < edges.length - 1; j++) {
+      for (let i = 0; i < edges.length - 1; i++) {
+        const halfA = (edges[i] === 0 ? 0 : (edges[i] === this.avenue ? street * 0.75 : street / 2));
+        const halfB = (edges[i + 1] === S ? 0 : (edges[i + 1] === this.avenue ? street * 0.75 : street / 2));
+        const halfC = (edges[j] === 0 ? 0 : (edges[j] === this.avenue ? street * 0.75 : street / 2));
+        const halfD = (edges[j + 1] === S ? 0 : (edges[j + 1] === this.avenue ? street * 0.75 : street / 2));
+        const x0 = edges[i] + halfA, x1 = edges[i + 1] - halfB;
+        const z0 = edges[j] + halfC, z1 = edges[j + 1] - halfD;
+        if (x1 - x0 < 14 || z1 - z0 < 14) continue;
+        this.blocks.push({ x0, z0, x1, z1, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0 });
+      }
+    }
   }
 
   /** Lay a road along a spline of normalised waypoints, levelling as it goes. */
@@ -90,7 +140,8 @@ export class Terrain {
           const k = this.idx(i, j);
           const w = 1 - d / widthM;
           this.height[k] = lerp(this.height[k], target, w * 0.75);
-          if (d < widthM * 0.6) this.ground[k] = GROUND.ROAD;
+          const surface = this.opts.ground === 'urban' ? GROUND.PAVING : GROUND.ROAD;
+          if (d < widthM * 0.6) this.ground[k] = surface;
           else if (this.ground[k] === GROUND.GRASS) this.ground[k] = GROUND.DIRT;
         }
       }

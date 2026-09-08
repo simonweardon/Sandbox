@@ -158,8 +158,14 @@ function stepSoldierCombat(battle, s, dt) {
   const range = dist(s.x, s.z, t.x, t.z);
   if (range > weaponReach(s) * 1.1 || !canSee(world, s, t)) { s.target = null; return; }
 
-  // Face the target and settle the aim.
-  s.yaw = turnTowards(s.yaw, bearingTo(s, t), 3.2 * dt);
+  // Face the target and settle the aim. A window only covers the arc it faces.
+  if (s.garrison != null) {
+    const off = angleDelta(s.windowYaw ?? s.yaw, bearingTo(s, t));
+    if (Math.abs(off) > 75 * DEG) { s.target = null; return; }
+    s.yaw = turnTowards(s.yaw, bearingTo(s, t), 2.2 * dt);
+  } else {
+    s.yaw = turnTowards(s.yaw, bearingTo(s, t), 3.2 * dt);
+  }
   const primary = WEAPONS[s.inv.primary];
   const useLauncher = s.inv.launcher && s.inv.rockets > 0 && t.kind === KIND.VEHICLE
     && !t.abandoned && range < WEAPONS[s.inv.launcher].range;
@@ -212,10 +218,12 @@ function weaponReach(s) {
 function fireOne(battle, s, weaponKey, target, range) {
   const world = battle.world;
   const w = WEAPONS[weaponKey];
-  const gy = world.terrain.heightAt(s.x, s.z);
+  // From the window if he is in one; the slot already sits proud of the wall,
+  // so the round leaves the building instead of striking it from inside.
+  const base = s.garrison != null ? s.y : world.terrain.heightAt(s.x, s.z);
   const from = {
     x: s.x + Math.sin(s.yaw) * 0.4,
-    y: gy + STANCE_HEIGHT[s.stance] * 0.82,
+    y: base + STANCE_HEIGHT[s.stance] * 0.82,
     z: s.z + Math.cos(s.yaw) * 0.4,
   };
   const aimAt = leadTarget(from, { x: target.x, z: target.z, y: targetHeight(world, target), velX: target.velX, velZ: target.velZ }, w.velocity);

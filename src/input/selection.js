@@ -6,6 +6,7 @@ import { ORDER, issueOrder } from '../sim/orders.js';
 import { visibleTo } from '../sim/vision.js';
 import { STANCE } from '../sim/units.js';
 import { dist } from '../core/util.js';
+import { buildingAt, isGarrisonable, leaveBuilding } from '../sim/garrison.js';
 
 export class Selection {
   constructor(battle, rig, canvas) {
@@ -124,6 +125,22 @@ export class Selection {
       }
       label = 'board';
     } else {
+      // A building under the cursor is an order to occupy it, not to walk into
+      // the wall — which is the whole of city fighting.
+      const building = opts.attackMove ? null : buildingAt(b.world, point.x, point.z, 1.5);
+      const infantry = this.units.filter((u) => u.kind === KIND.SOLDIER);
+      if (building && infantry.length) {
+        for (const u of infantry) {
+          issueOrder(b, u, { type: ORDER.GARRISON, propId: building.id, x: point.x, z: point.z }, queue);
+        }
+        // Anything that cannot go indoors still moves up to it.
+        for (const u of this.units) {
+          if (u.kind === KIND.SOLDIER) continue;
+          issueOrder(b, u, { type: ORDER.MOVE, x: point.x, z: point.z }, queue);
+        }
+        return 'garrison';
+      }
+
       const flag = b.world.flags.find((f) => dist(f.x, f.z, point.x, point.z) < f.radius);
       const formation = this.formationOffsets(this.units.length);
       this.units.forEach((u, i) => {
@@ -156,6 +173,15 @@ export class Selection {
     const any = this.units.some((u) => !u.holdFire);
     for (const u of this.units) { u.holdFire = any; if (any) u.target = null; }
     return any;
+  }
+
+  /** Turn everybody selected out of whatever they are inside. */
+  dismount() {
+    let n = 0;
+    for (const u of this.units) {
+      if (u.kind === KIND.SOLDIER && u.garrison != null) { leaveBuilding(this.battle.world, u); n++; }
+    }
+    return n;
   }
 
   stop() {
