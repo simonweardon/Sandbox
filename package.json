@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test/run.js",
-    "test:browser": "node test/browser.mjs"
+    "test:browser": "node test/browser.mjs",
+    "test:mobile": "node test/mobile.mjs"
   },
   "engines": { "node": ">=18" }
 }

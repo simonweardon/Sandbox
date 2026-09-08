@@ -114,7 +114,23 @@ the buildings overlooking it, which is why taking a block off it is slow work.
 
 ## Playing it
 
-Press **F1** for the controls at any time.
+It runs on a phone as well as a computer. Press **F1** for the controls.
+
+### On a touchscreen
+
+There is no right button and no keyboard, so the scheme is a different one:
+
+| Gesture | What it does |
+| --- | --- |
+| Tap your own unit | Select it |
+| Long press it | Select the whole squad |
+| Tap anywhere else | Order the selection there — move, attack, get in, occupy, depending on what is under your finger |
+| Drag | Pan |
+| Pinch, twist | Zoom, rotate |
+| Buttons along the bottom | Stance, hold fire, stop, get out, take over |
+
+Taking a unit over swaps that bar for a thumb stick on the left, a drag-to-aim
+area, and a trigger — the same direct control, driven with two thumbs.
 
 **Commanding.** Left click or drag to select, double click for the whole squad,
 right click to move — or to attack whatever is under the cursor. Shift queues
@@ -214,6 +230,7 @@ where to go — reads the world that function builds.
 npm start            # serve on :3000
 npm test             # 47 tests of the simulation, no browser needed
 npm run test:browser # 37 more, driving the real interface with mouse and keys
+npm run test:mobile  # 17 more, driving it with a thumb on a phone screen
 ```
 
 No build step and no install: the only dependency is three.js, vendored under
@@ -222,7 +239,7 @@ deliberately *not* a dependency — install it yourself, or point
 `PLAYWRIGHT_PATH` and `CHROMIUM_PATH` at an existing one. Without it they say
 so and skip.
 
-### Two kinds of test, because there are two kinds of bug
+### Three kinds of test, because there are three kinds of bug
 
 `test/run.js` fights whole battles in Node with no renderer at all, which is
 how the balance figures above were measured. It caught five real bugs while it
@@ -248,3 +265,11 @@ seen, because none of it was in the simulation at all:
 
 The last two only show up if you sit and watch a whole battle, which is why
 the suite now plays one to the end and then counts what is still on the GPU.
+
+`test/mobile.mjs` drives it with a thumb on a phone-sized touchscreen, and
+found two more that neither of the others could see: the stylesheet had no
+`touch-action`, so the browser held every touch back to see whether it was a
+scroll and the canvas never received a `pointerdown` at all; and the
+reinforcement panel covered the middle third of a portrait screen, so taps
+meant for the battlefield landed on it instead. Both made the game unplayable
+on a phone while every desktop test stayed green.

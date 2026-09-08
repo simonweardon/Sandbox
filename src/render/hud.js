@@ -85,6 +85,25 @@ export class Hud {
     r.appendChild(this.help);
     this.buildMapPicker();
 
+    // Touch controls: the buttons a phone has no keyboard for.
+    this.touchBar = el('div', 'hud-touch');
+    this.touchBar.innerHTML = `
+      <button data-act="stance">Prone</button>
+      <button data-act="hold">Hold</button>
+      <button data-act="stop">Stop</button>
+      <button data-act="out">Get out</button>
+      <button data-act="direct" class="primary">Take over</button>`;
+    r.appendChild(this.touchBar);
+
+    this.pad = el('div', 'hud-pad');
+    this.pad.innerHTML = `
+      <div class="stick"><i></i></div>
+      <button class="fire">FIRE</button>
+      <button class="mg">MG</button>
+      <button class="shell">AP/HE</button>
+      <button class="leave">Hand back</button>`;
+    r.appendChild(this.pad);
+
     // Shown once, when the battle is decided.
     this.end = el('div', 'hud-end');
     this.end.style.display = 'none';
@@ -144,6 +163,46 @@ export class Hud {
     }
   }
 
+  /** Wire the touch controls to the same actions the keys use. */
+  bindTouch(handlers) {
+    this.touchHandlers = handlers;
+    this.touchBar.addEventListener('click', (e) => {
+      const act = e.target.closest('button')?.dataset.act;
+      if (act && handlers[act]) handlers[act]();
+    });
+    const press = (sel, on, off) => {
+      const b = this.pad.querySelector(sel);
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); on(); });
+      if (off) for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+        b.addEventListener(ev, (e) => { e.stopPropagation(); off(); });
+      }
+    };
+    press('.fire', handlers.fireOn, handlers.fireOff);
+    press('.mg', handlers.mgOn, handlers.mgOff);
+    press('.shell', handlers.shell);
+    press('.leave', handlers.leave);
+  }
+
+  /** Draw the thumb stick where the thumb actually is. */
+  updatePad(stick) {
+    const on = this.direct.active;
+    this.pad.classList.toggle('on', on);
+    this.touchBar.classList.toggle('hidden', on);
+    const knob = this.pad.querySelector('.stick');
+    if (!on) return;
+    if (stick) {
+      knob.style.left = `${stick.ox}px`;
+      knob.style.top = `${stick.oy}px`;
+      knob.style.opacity = '1';
+      knob.firstElementChild.style.transform = `translate(${stick.dx}px, ${stick.dy}px)`;
+    } else {
+      knob.style.opacity = '0.35';
+      knob.style.left = '';
+      knob.style.top = '';
+      knob.firstElementChild.style.transform = '';
+    }
+  }
+
   refreshSpeed() {
     for (const b of this.speedBox.children) {
       const m = Number(b.dataset.mult);
@@ -168,6 +227,9 @@ export class Hud {
     const list = b.callList(b.playerSide);
     this.callBox.innerHTML = '';
     const head = el('div', 'calls-head', 'CALL IN REINFORCEMENTS');
+    // On a phone this panel would cover half the battlefield, so it folds away
+    // behind its own heading and the map underneath stays tappable.
+    head.addEventListener('click', () => this.callBox.classList.toggle('open'));
     this.callBox.appendChild(head);
     this.callButtons = [];
     for (const [group, items] of Object.entries(list)) {
@@ -231,6 +293,7 @@ export class Hud {
     this.updatePanel();
     this.updateDirect();
     this.updateMap();
+    if (this.touchOn) this.updatePad(this.touchStick);
     if (b.over) this.showEnd(b.over);
   }
 

@@ -13,6 +13,7 @@ import { Hud } from './render/hud.js';
 import { CameraRig } from './input/camera.js';
 import { Selection } from './input/selection.js';
 import { DirectControl } from './input/directcontrol.js';
+import { TouchInput } from './input/touch.js';
 import { DEG } from './core/util.js';
 import { VEHICLES, GUNS } from './data/vehicles.js';
 import { makeVehicle, makeGun, makeSquad, disembark } from './sim/units.js';
@@ -38,6 +39,46 @@ const selection = new Selection(battle, rig, canvas);
 const direct = new DirectControl(battle, rig);
 const hud = new Hud(overlay, battle, selection, direct);
 hud.rig = rig;
+
+// On a touchscreen the mouse-and-keyboard scheme is replaced wholesale.
+const touch = new TouchInput(battle, rig, selection, direct, hud, canvas);
+if (TouchInput.available()) {
+  touch.enable();
+  hud.touchOn = true;
+  hud.bindTouch({
+    stance: () => {
+      const men = selection.units.filter((u) => u.kind === KIND.SOLDIER);
+      if (!men.length) return hud.say('Nothing selected');
+      const next = men[0].stance === STANCE.PRONE ? STANCE.STAND : STANCE.PRONE;
+      selection.setStance(next);
+      hud.say(next === STANCE.PRONE ? 'Down' : 'Up');
+    },
+    hold: () => hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'),
+    stop: () => { selection.stop(); hud.say('Stop'); },
+    out: () => {
+      let n = selection.dismount();
+      for (const u of selection.units) {
+        if (u.kind !== KIND.VEHICLE) continue;
+        for (const id of [...u.passengers, ...u.crew.map((c) => c.occupant)].filter(Boolean)) {
+          const s2 = battle.world.byId.get(id);
+          if (s2) { disembark(battle.world, s2); n++; }
+        }
+      }
+      hud.say(n ? `${n} dismounted` : 'Nobody aboard or inside');
+    },
+    direct: () => {
+      const u = selection.units[0];
+      if (u && direct.take(u)) hud.say(direct.message);
+      else hud.say(direct.message || 'Select a unit first');
+    },
+    fireOn: () => touch.pullTrigger(true),
+    fireOff: () => touch.pullTrigger(false),
+    mgOn: () => touch.pullTrigger(true, true),
+    mgOff: () => touch.pullTrigger(false, true),
+    shell: () => (direct.unit?.kind === KIND.SOLDIER ? direct.reload() : direct.cycleShell()),
+    leave: () => { direct.release(); hud.say('Unit handed back'); },
+  });
+}
 
 rig.focus.set(battle.size * 0.5, 0, battle.size * 0.16);
 
@@ -66,6 +107,7 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (e) => {
   ndc(e);
+  if (touch.down(e)) return;
   canvas.setPointerCapture(e.pointerId);
   mouse.down = true;
   mouse.button = e.button;
@@ -86,6 +128,7 @@ canvas.addEventListener('pointerdown', (e) => {
 addEventListener('pointermove', (e) => {
   const prevX = mouse.x, prevY = mouse.y;
   ndc(e);
+  if (touch.move(e)) return;
   if (direct.active) { direct.setAimFromScreen(mouse.ndcX, mouse.ndcY); return; }
   if (mouse.down && mouse.button === 1) {
     rig.rotate(-(e.clientX - prevX) * 0.006, (e.clientY - prevY) * 0.004);
@@ -105,6 +148,7 @@ addEventListener('pointermove', (e) => {
 });
 
 addEventListener('pointerup', (e) => {
+  if (touch.up(e)) return;
   if (direct.active) {
     if (e.button === 0) direct.firing = false;
     if (e.button === 2) direct.secondary = false;
@@ -264,6 +308,11 @@ function frame(now) {
   }
 
   const steps = battle.advance(dt);
+  if (touch.enabled) {
+    touch.applyStick();
+    if (direct.active) touch.stepTriggers();
+    hud.touchStick = touch.stickState();
+  }
   if (direct.active) direct.update(dt);
   selection.prune();
 
@@ -296,7 +345,7 @@ requestAnimationFrame(frame);
 // Exposed for the visual smoke test under test/, and for poking at from the
 // browser console: lay out one of every vehicle, fast-forward a battle, or
 // take a unit under direct control without touching the interface.
-window.game = { battle, view, effects, rig, selection, direct, hud, scene, renderer, camera, THREE };
+window.game = { battle, view, effects, rig, selection, direct, hud, touch, scene, renderer, camera, THREE };
 window.__gar = garrisonMod;
 window.game.spawn = {
   vehicles: VEHICLES,
