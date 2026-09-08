@@ -166,9 +166,31 @@ roles in it, and a kit per role in `KITS`.
 ## Running it
 
 ```
-npm start     # serve on :3000
-npm test      # 34 tests, no browser needed
+npm start            # serve on :3000
+npm test             # 34 tests of the simulation, no browser needed
+npm run test:browser # 25 more, driving the real interface with mouse and keys
 ```
 
 No build step and no install: the only dependency is three.js, vendored under
-`vendor/` (MIT, licence included).
+`vendor/` (MIT, licence included). The browser tests want Playwright, which is
+deliberately *not* a dependency — install it yourself, or point
+`PLAYWRIGHT_PATH` and `CHROMIUM_PATH` at an existing one. Without it they say
+so and skip.
+
+### Two kinds of test, because there are two kinds of bug
+
+`test/run.js` fights whole battles in Node with no renderer at all, which is
+how the balance figures above were measured. It caught five real bugs while it
+was being written: an infantry role used but never defined, understated 76 mm
+penetration figures, a projectile ceiling that culled mortar shells in
+mid-flight, an elevation solver that could walk past vertical and fire
+backwards over the firer, and fuel tanks modelled *inside* the engine so that
+engine hits were absorbed by the fuel.
+
+`test/browser.mjs` clicks and types at the real thing. It caught two more that
+the headless tests could never have seen, because they were not in the
+simulation at all: a stylesheet rule whose ID specificity beat
+`pointer-events: none` and let the crosshair swallow every click at the centre
+of the screen, and a double click that never registered because pointer events
+report `detail` as `0`. Both made the game unplayable with a mouse, and both
+were invisible to everything else.

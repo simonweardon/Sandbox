@@ -15,7 +15,7 @@ import { Selection } from './input/selection.js';
 import { DirectControl } from './input/directcontrol.js';
 import { DEG } from './core/util.js';
 import { VEHICLES, GUNS } from './data/vehicles.js';
-import { makeVehicle, makeGun, makeSquad } from './sim/units.js';
+import { makeVehicle, makeGun, makeSquad, disembark } from './sim/units.js';
 import { Commander } from './sim/ai.js';
 
 const canvas = document.getElementById('view');
@@ -45,6 +45,7 @@ rig.focus.set(battle.size * 0.5, 0, battle.size * 0.16);
 const keys = new Set();
 const mouse = { x: 0, y: 0, ndcX: 0, ndcY: 0, down: false, button: 0, dragging: false, start: null };
 let attackMoveArmed = false;
+let lastClick = null;
 
 function ndc(e) {
   mouse.x = e.clientX; mouse.y = e.clientY;
@@ -112,9 +113,16 @@ addEventListener('pointerup', (e) => {
     if (mouse.dragging) {
       selection.boxSelect(mouse.start, { x: e.clientX, y: e.clientY }, e.shiftKey);
     } else {
+      // Pointer events report detail as 0, so the double click has to be
+      // recognised here rather than read off the event.
+      const now = performance.now();
+      const isDouble = lastClick && now - lastClick.t < 350
+        && Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < 6;
+      lastClick = { t: now, x: e.clientX, y: e.clientY };
+
       const hit = selection.pick(mouse.ndcX, mouse.ndcY);
       if (hit && hit.faction === battle.playerSide) {
-        if (e.detail >= 2) selection.selectSquad(hit);
+        if (isDouble) selection.selectSquad(hit);
         else if (e.shiftKey) selection.add([hit]);
         else selection.set([hit]);
       } else if (!e.shiftKey) {
@@ -198,17 +206,23 @@ addEventListener('keydown', (e) => {
     }
     case 'KeyH': hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'); break;
     case 'KeyX': selection.stop(); hud.say('Stop'); break;
-    case 'KeyU':
+    case 'KeyU': {
+      // Everybody out: passengers first, then the crew, so a half-track empties
+      // its section without also abandoning itself unless that is what you meant.
+      let out = 0;
       for (const u of selection.units) {
-        if (u.kind === KIND.VEHICLE) {
-          for (const c of [...u.crew, ...u.passengers.map((id) => ({ occupant: id }))]) {
-            const s = c.occupant && battle.world.byId.get(c.occupant);
-            if (s) battle.world.byId.get(s.id) && import('./sim/units.js').then((M) => M.disembark(battle.world, s));
-          }
+        if (u.kind !== KIND.VEHICLE) continue;
+        const aboard = [...u.passengers, ...u.crew.map((c) => c.occupant)].filter(Boolean);
+        for (const id of aboard) {
+          const s = battle.world.byId.get(id);
+          if (!s) continue;
+          disembark(battle.world, s);
+          out++;
         }
       }
-      hud.say('Dismounting');
+      hud.say(out ? `${out} dismounted` : 'Nobody aboard');
       break;
+    }
     case 'F1': hud.toggleHelp(); e.preventDefault(); break;
     case 'Escape': hud.help.style.display = 'none'; selection.clear(); break;
     default: break;

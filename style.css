@@ -16,8 +16,13 @@ body {
   user-select: none;
 }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+/* The interface must not eat clicks meant for the battlefield. Only the parts
+   you actually operate take the pointer; everything else reads through. Listing
+   them explicitly avoids a specificity fight with `pointer-events: none` on the
+   panels, which an `#hud > *` rule would win — and the crosshair sits dead in
+   the middle of the screen, exactly where you click most. */
 #hud { position: fixed; inset: 0; pointer-events: none; }
-#hud > * { pointer-events: auto; }
+.hud-speed, .hud-calls, .hud-map, .hud-help { pointer-events: auto; }
 #marquee {
   position: fixed; display: none; pointer-events: none;
   border: 1px solid #a8e39a; background: rgba(150, 220, 140, 0.13);
@@ -25,7 +30,7 @@ body {
 
 /* ---- top bar ---------------------------------------------------------- */
 .hud-top {
-  position: absolute; top: 0; left: 0; right: 0; height: 40px;
+  position: absolute; top: 0; left: 0; right: 0; height: 40px; pointer-events: none;
   display: flex; align-items: center; gap: 18px; padding: 0 16px;
   background: linear-gradient(rgba(12, 14, 12, 0.85), rgba(12, 14, 12, 0));
 }
