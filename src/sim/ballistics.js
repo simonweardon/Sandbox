@@ -127,22 +127,26 @@ function flyTo(range, speed, elev, dragK) {
  */
 export function solveElevationDrag(range, dy, speed, shell, high = false) {
   const dragK = DRAG[shell] ?? DRAG.ap;
-  let e = solveElevation(range, dy, speed, high);
-  if (e === null) return null;
+  // No gun elevates past 85 degrees, and a solver that wanders past vertical
+  // sends the shell backwards over the firer's head.
+  const MAX = high ? 85 * DEG : 35 * DEG;
+  const MIN = -20 * DEG;
+  let e = clamp(solveElevation(range, dy, speed, high) ?? NaN, MIN, MAX);
+  if (!Number.isFinite(e)) return null;
   let prevE = e, prevErr = null;
   for (let i = 0; i < 8; i++) {
     const r = flyTo(range, speed, e, dragK);
-    if (!r) { e += 0.02; continue; }
+    if (!r) { e = clamp(e + 0.02, MIN, MAX); continue; }
     const err = r.y - dy;
     if (Math.abs(err) < 0.06) return e;
     if (prevErr !== null && Math.abs(err - prevErr) > 1e-9) {
       const next = e - err * (e - prevE) / (err - prevErr);
       prevE = e; prevErr = err;
-      e = clamp(next, -0.6, high ? 1.5 : 0.6);
+      e = clamp(next, MIN, MAX);
     } else {
       prevE = e; prevErr = err;
       // First step: nudge by the angle that would close the gap in a vacuum.
-      e += clamp(-err / Math.max(range, 1), -0.05, 0.05);
+      e = clamp(e + clamp(-err / Math.max(range, 1), -0.05, 0.05), MIN, MAX);
     }
   }
   return e;
@@ -201,7 +205,9 @@ export function stepProjectiles(world, dt) {
       burst(world, p, hx, world.terrain.heightAt(hx, hz), hz, null);
       continue;
     }
-    if (p.life <= 0 || !world.terrain.inBounds(p.x, p.z) || p.y > 400) continue;
+    // The ceiling has to clear a mortar's arc: at minimum range an 8 cm
+    // shell goes up well over a kilometre before it comes down.
+    if (p.life <= 0 || !world.terrain.inBounds(p.x, p.z) || p.y > 2500) continue;
     keep.push(p);
   }
   world.projectiles = keep;

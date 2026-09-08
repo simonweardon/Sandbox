@@ -203,7 +203,7 @@ export function applySpall(world, v, entry, dir, energy, weapon, attacker) {
   let anything = false;
   for (const h of hits) {
     if (left <= 0.05) break;
-    const dmg = (h.spall ? (h.c.crew ? 75 : 45) : 130) * left * h.closeness * (0.7 + roll() * 0.6)
+    const dmg = (h.spall ? (h.c.crew ? 75 : 45) : 170) * left * h.closeness * (0.7 + roll() * 0.6)
       * (weapon ? clamp(weapon.caliber / 75, 0.4, 2.2) : 1);
     hurtComponent(world, v, h.c, dmg);
     anything = true;

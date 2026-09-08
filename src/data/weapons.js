@@ -131,7 +131,7 @@ export const WEAPONS = {
   f34_76: {
     name: '76 mm F-34', cls: 'cannon', shell: SHELL.AP, caliber: 76,
     velocity: 662, rof: 12, mag: 1, reload: 5.0, disp: 1.4, aimTime: 2.2,
-    damage: 175, pen100: 76, penDecay: 2.0, he: 0.62, range: 2200, tracerEvery: 1,
+    damage: 175, pen100: 84, penDecay: 2.2, he: 0.62, range: 2200, tracerEvery: 1,
   },
   zis_s53_85: {
     name: '85 mm ZiS-S-53', cls: 'cannon', shell: SHELL.AP, caliber: 85,
@@ -146,7 +146,7 @@ export const WEAPONS = {
   zis3_76: {
     name: '76 mm ZiS-3', cls: 'cannon', shell: SHELL.AP, caliber: 76,
     velocity: 680, rof: 15, mag: 1, reload: 4.2, disp: 1.2, aimTime: 2.0,
-    damage: 175, pen100: 82, penDecay: 2.1, he: 0.71, range: 2400, tracerEvery: 1,
+    damage: 175, pen100: 86, penDecay: 2.2, he: 0.71, range: 2400, tracerEvery: 1,
   },
   pak40_75: {
     name: '7.5 cm Pak 40', cls: 'cannon', shell: SHELL.AP, caliber: 75,

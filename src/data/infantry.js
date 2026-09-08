@@ -15,6 +15,7 @@ export const ROLES = {
   officer:  { name: 'Officer', hp: 100, spot: 300, cost: 30, moraleAura: 22 },
   medic:    { name: 'Medic', hp: 100, spot: 240, cost: 20, heals: true },
   crew:     { name: 'Vehicle crew', hp: 100, spot: 220, cost: 10, repairs: true },
+  assault:  { name: 'Assault trooper', hp: 100, spot: 240, cost: 18 },
 };
 
 /** A kit is what a soldier is actually carrying when they spawn. */

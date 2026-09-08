@@ -4,7 +4,7 @@ export const FACTIONS = {
   ger: {
     name: 'Wehrmacht', tag: 'GER',
     colour: 0x9fb0c4, marker: '#8fa8c8', accent: '#c9d6e6',
-    uniform: 0x5c6650, helmet: 0x4a5245, skin: 0xd6a780, gear: 0x3e3a33,
+    uniform: 0x616d62, helmet: 0x424a42, skin: 0xd6a780, gear: 0x3a3a33,
     calls: {
       infantry: ['ger_grenadier', 'ger_assault', 'ger_at', 'ger_engineer', 'ger_sniper'],
       support: ['pak40', 'mortar_ger'],
@@ -14,7 +14,7 @@ export const FACTIONS = {
   sov: {
     name: 'Red Army', tag: 'SOV',
     colour: 0xd06a5a, marker: '#d8624e', accent: '#f0a08c',
-    uniform: 0x6b6244, helmet: 0x5a5a3e, skin: 0xd6a780, gear: 0x4a3f2e,
+    uniform: 0x94845a, helmet: 0x6a6440, skin: 0xd6a780, gear: 0x54452e,
     calls: {
       infantry: ['sov_rifle', 'sov_smg', 'sov_at', 'sov_engineer', 'sov_sniper'],
       support: ['zis3', 'mortar_sov'],
@@ -24,7 +24,7 @@ export const FACTIONS = {
   usa: {
     name: 'US Army', tag: 'USA',
     colour: 0x86c08a, marker: '#6fbf7a', accent: '#bfe3c2',
-    uniform: 0x6f6a4a, helmet: 0x545a45, skin: 0xd6a780, gear: 0x4d4636,
+    uniform: 0x737a52, helmet: 0x4d553c, skin: 0xd6a780, gear: 0x453f2c,
     calls: {
       infantry: ['usa_rifle', 'usa_at', 'usa_engineer', 'usa_sniper'],
       support: ['pak40', 'mortar_ger'],
