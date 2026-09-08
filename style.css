@@ -195,7 +195,13 @@ body {
 .hud-help td { padding: 2px 8px; }
 .hud-help td:first-child { color: #cfd8c4; width: 190px; }
 .hud-help td:last-child { color: var(--dim); }
-.hud-help .dismiss { margin-top: 16px; font-size: 10px; letter-spacing: 0.1em; }
+.hud-help .dismiss { margin-top: 10px; font-size: 10px; letter-spacing: 0.1em; }
+.hud-help .help-start {
+  margin-top: 18px; font: inherit; font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em; cursor: pointer; padding: 11px 26px;
+  color: #0e1a0c; background: var(--good); border: 0; border-radius: 4px;
+}
+.hud-help .help-start:hover { filter: brightness(1.1); }
 .hud-help > * { max-width: 640px; }
 
 /* ---- end of battle ---------------------------------------------------- */
@@ -312,7 +318,16 @@ body.touch .hud-pad.on { display: block; }
   .hud-mp .val { font-size: 15px; }
   .hud-mp .lbl { display: none; }
   .hud-flags .pip { width: 16px; }
-  .hud-dc { bottom: 74px; min-width: 0; width: 62vw; padding: 6px 10px; }
+  /* While driving, the readout goes to the top and everything else that would
+     sit under a thumb is hidden. */
+  .hud-dc { bottom: auto; top: 40px; min-width: 0; width: 74vw; padding: 6px 10px; }
+  .hud-dc .crewrow { margin: 3px 0; }
+  body.driving .hud-panel,
+  body.driving .hud-calls,
+  body.driving .hud-log { display: none; }
+  /* The readout takes the top of the screen while driving; the map would sit
+     underneath it, so it stands down too. */
+  body.driving .hud-map { display: none; }
   .hud-help { font-size: 12px; overflow-y: auto; padding: 16px; }
   .hud-help table { display: none; }
   .hud-help > * { max-width: 92vw; }

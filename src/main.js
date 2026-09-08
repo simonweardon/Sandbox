@@ -312,6 +312,9 @@ function frame(now) {
     touch.applyStick();
     if (direct.active) touch.stepTriggers();
     hud.touchStick = touch.stickState();
+    // Driving needs the bottom of a phone screen for the stick and the
+    // trigger, so the command panels get out of the way while you are in it.
+    document.body.classList.toggle('driving', direct.active);
   }
   if (direct.active) direct.update(dt);
   selection.prune();

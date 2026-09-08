@@ -67,7 +67,7 @@ check('the page does not scroll sideways',
   await state(() => `${document.documentElement.scrollWidth} > ${window.innerWidth}`));
 
 // Dismiss the opening screen by tapping it.
-await page.tap('.hud-help');
+await page.tap('.help-start');
 await page.waitForTimeout(400);
 check('tapping the opening screen dismisses it',
   await state(() => window.game.hud.help.style.display === 'none'));

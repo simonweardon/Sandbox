@@ -84,6 +84,10 @@ export class Hud {
     this.help.style.display = 'none';
     r.appendChild(this.help);
     this.buildMapPicker();
+    // A phone has no F1 key, and "tap anywhere to close" collides with the map
+    // buttons inside the panel, so give it something explicit to press.
+    const start = this.help.querySelector('.help-start');
+    if (start) start.addEventListener('click', (e) => { e.stopPropagation(); this.toggleHelp(); });
 
     // Touch controls: the buttons a phone has no keyboard for.
     this.touchBar = el('div', 'hud-touch');
@@ -498,4 +502,5 @@ simulated projectile; armour is resolved plate by plate; ammunition runs out.</p
 <tr><td>Space</td><td>Brake</td></tr>
 <tr><td>Enter or Esc</td><td>Hand the unit back</td></tr>
 </table>
-<p class="dismiss">F1 or click to close</p>`;
+<button class="help-start">Begin the battle</button>
+<p class="dismiss">F1 to bring this back</p>`;
