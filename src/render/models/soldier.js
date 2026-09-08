@@ -230,11 +230,33 @@ export function poseSoldier(model, { phase, moving, stance, aim = 0, firing = 0 
   head.rotation.x = -arms.rotation.x * 0.3;
 }
 
-/** A body on the ground, for the aftermath. */
+const CORPSE_CACHE = new Map();
+
+/**
+ * A body on the ground, for the aftermath. A corpse never moves again, so the
+ * five posed parts are baked into one mesh, and one geometry serves every
+ * fallen man of the same kind — a battlefield can hold hundreds of them.
+ */
 export function buildCorpse(faction, role, weaponKey) {
-  const m = buildSoldier(faction, role, weaponKey);
-  poseSoldier(m, { phase: 0, moving: false, stance: 2, aim: 0 });
-  m.body.rotation.z = 0.4;
-  m.root.rotation.y = hashNoise(role.length * 3.3) * Math.PI * 2;
-  return m.root;
+  const key = `${faction}|${role}|${weaponKey}`;
+  let geom = CORPSE_CACHE.get(key);
+  if (!geom) {
+    const m = buildSoldier(faction, role, weaponKey);
+    poseSoldier(m, { phase: 0, moving: false, stance: 2, aim: 0 });
+    m.body.rotation.z = 0.4;
+    m.root.updateMatrixWorld(true);
+    const parts = [];
+    m.root.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = o.geometry.clone();
+      g.applyMatrix4(o.matrixWorld);
+      parts.push(g);
+    });
+    geom = merge(parts);
+    CORPSE_CACHE.set(key, geom);
+  }
+  const mesh = new THREE.Mesh(geom, PAINTED);
+  mesh.rotation.y = hashNoise(role.length * 3.3) * Math.PI * 2;
+  mesh.castShadow = true;
+  return mesh;
 }

@@ -83,9 +83,10 @@ Press **F1** for the controls at any time.
 
 **Commanding.** Left click or drag to select, double click for the whole squad,
 right click to move — or to attack whatever is under the cursor. Shift queues
-orders, `A` plus right click is an attack-move, and right-clicking one of your
+orders, Ctrl plus right click is an attack-move, and right-clicking one of your
 own vehicles puts the selected infantry aboard (hold Ctrl to crew it rather
-than ride in it). `1`/`2`/`3` set stance, `H` holds fire, `X` stops.
+than ride in it). `1`/`2`/`3` set stance, `H` holds fire, `X` stops, `U`
+dismounts.
 
 **Direct control.** Select a unit and press **Enter**. You are now the crew.
 `W`/`A`/`S`/`D` drive, the mouse lays the gun, left click fires the main
@@ -99,7 +100,8 @@ gun is laid and loaded. That gap is the whole game.
 
 **Winning.** Five objectives run down the middle of the map. Holding them pays
 for reinforcements, which arrive at your own edge and have to make their way
-up. Take all five to win.
+up. Take all five to win — a typical battle runs ten to twenty minutes, and
+ends with a card telling you what it cost both sides.
 
 ## How it is put together
 
@@ -187,10 +189,19 @@ mid-flight, an elevation solver that could walk past vertical and fire
 backwards over the firer, and fuel tanks modelled *inside* the engine so that
 engine hits were absorbed by the fuel.
 
-`test/browser.mjs` clicks and types at the real thing. It caught two more that
-the headless tests could never have seen, because they were not in the
-simulation at all: a stylesheet rule whose ID specificity beat
-`pointer-events: none` and let the crosshair swallow every click at the centre
-of the screen, and a double click that never registered because pointer events
-report `detail` as `0`. Both made the game unplayable with a mouse, and both
-were invisible to everything else.
+`test/browser.mjs` clicks and types at the real thing, and plays a battle
+through to its end. It caught everything the headless tests could never have
+seen, because none of it was in the simulation at all:
+
+- a stylesheet rule whose ID specificity beat `pointer-events: none`, letting
+  the crosshair swallow every click at the centre of the screen
+- a double click that never registered, because pointer events report `detail`
+  as `0`
+- attack-move bound to `A`, which is also camera-left, so arming it slid the
+  view off the target
+- winning did nothing: the battle simply stopped and never said why
+- a material cloned for every wreck, body and shell crater and never released —
+  734 of them by the fourteenth minute, against 16 now
+
+The last two only show up if you sit and watch a whole battle, which is why
+the suite now plays one to the end and then counts what is still on the GPU.

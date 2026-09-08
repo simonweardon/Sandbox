@@ -44,7 +44,6 @@ rig.focus.set(battle.size * 0.5, 0, battle.size * 0.16);
 
 const keys = new Set();
 const mouse = { x: 0, y: 0, ndcX: 0, ndcY: 0, down: false, button: 0, dragging: false, start: null };
-let attackMoveArmed = false;
 let lastClick = null;
 
 function ndc(e) {
@@ -144,12 +143,13 @@ canvas.addEventListener('wheel', (e) => {
 function issueOrderAt(e) {
   const point = rig.groundPoint(mouse.ndcX, mouse.ndcY);
   const target = selection.pick(mouse.ndcX, mouse.ndcY);
+  // Ctrl + right click on the ground is an attack-move. It used to be A, which
+  // is also camera-left, so arming it slid the view away from the target.
   const label = selection.order(point, target, {
     queue: e.shiftKey,
-    attackMove: attackMoveArmed || keys.has('KeyA'),
+    attackMove: e.ctrlKey && !(target && target.kind === KIND.VEHICLE && target.faction === battle.playerSide),
     asCrew: e.ctrlKey,
   });
-  attackMoveArmed = false;
   if (label) {
     hud.say(label === 'attack' ? 'Engaging' : label === 'board' ? 'Mounting up' : label === 'capture' ? 'Taking the objective' : 'Moving');
     effects.addDecal(point.x, point.z, 1.6, 0.35);
@@ -224,7 +224,7 @@ addEventListener('keydown', (e) => {
       break;
     }
     case 'F1': hud.toggleHelp(); e.preventDefault(); break;
-    case 'Escape': hud.help.style.display = 'none'; selection.clear(); break;
+    case 'Escape': hud.help.style.display = 'none'; hud.hideEnd(); selection.clear(); break;
     default: break;
   }
 });
@@ -251,8 +251,7 @@ function frame(now) {
     if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
     if (keys.has('KeyS') || keys.has('ArrowDown')) f -= 1;
     if (keys.has('KeyD') || keys.has('ArrowRight')) r += 1;
-    if (keys.has('KeyA') && !attackMoveArmed) r -= 1;
-    if (keys.has('ArrowLeft')) r -= 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) r -= 1;
     if (f || r) rig.pan(f, r, dt);
     if (keys.has('KeyQ')) rig.rotate(1.3 * dt, 0);
     if (keys.has('KeyE')) rig.rotate(-1.3 * dt, 0);

@@ -83,8 +83,48 @@ export class Hud {
     this.help.style.display = 'none';
     r.appendChild(this.help);
 
+    // Shown once, when the battle is decided.
+    this.end = el('div', 'hud-end');
+    this.end.style.display = 'none';
+    r.appendChild(this.end);
+
     this.refreshSpeed();
   }
+
+  /** The battle is over: say who won, how, and offer another. */
+  showEnd(over) {
+    if (this.endShown) return;
+    this.endShown = true;
+    const b = this.battle;
+    const won = over.winner === b.playerSide;
+    const t = Math.floor(b.time);
+    const clock = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    const wrecks = b.world.entities.filter((e) => e.kind === KIND.VEHICLE && (e.destroyed || e.abandoned));
+    const mine = wrecks.filter((v) => v.faction === b.playerSide).length;
+    const theirs = wrecks.length - mine;
+    const dead = b.world.corpses;
+    const myDead = dead.filter((c) => c.faction === b.playerSide).length;
+    this.end.innerHTML = `
+      <div class="end-card ${won ? 'won' : 'lost'}">
+        <div class="end-title">${won ? 'VICTORY' : 'DEFEAT'}</div>
+        <div class="end-sub">${b.sideName(over.winner)} ${over.reason} after ${clock}</div>
+        <div class="end-stats">
+          <div><b>${dead.length - myDead}</b> enemy killed</div>
+          <div><b>${myDead}</b> of yours lost</div>
+          <div><b>${theirs}</b> enemy vehicles knocked out</div>
+          <div><b>${mine}</b> of yours</div>
+        </div>
+        <button class="end-again">Fight another</button>
+        <div class="end-hint">Esc to look over the field</div>
+      </div>`;
+    this.end.style.display = '';
+    this.end.querySelector('.end-again').onclick = () => {
+      const seed = Math.floor(Math.random() * 100000);
+      location.search = `?seed=${seed}`;
+    };
+  }
+
+  hideEnd() { this.end.style.display = 'none'; }
 
   refreshSpeed() {
     for (const b of this.speedBox.children) {
@@ -171,6 +211,7 @@ export class Hud {
     this.updatePanel();
     this.updateDirect();
     this.updateMap();
+    if (b.over) this.showEnd(b.over);
   }
 
   updateLog() {
@@ -348,7 +389,7 @@ simulated projectile; armour is resolved plate by plate; ammunition runs out.</p
 <tr><td>Double click</td><td>Select the whole squad</td></tr>
 <tr><td>Right click</td><td>Move, or attack what is under the cursor</td></tr>
 <tr><td>Shift + right click</td><td>Queue the order</td></tr>
-<tr><td>A + right click</td><td>Attack-move</td></tr>
+<tr><td>Ctrl + right click</td><td>Attack-move: advance, engaging on the way</td></tr>
 <tr><td>Right click a vehicle</td><td>Get in (Ctrl to crew it)</td></tr>
 <tr><td>1 / 2 / 3</td><td>Stand / crouch / prone</td></tr>
 <tr><td>H</td><td>Hold fire</td></tr>

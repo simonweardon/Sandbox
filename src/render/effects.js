@@ -111,6 +111,7 @@ export class Effects {
       polygonOffset: true, polygonOffsetFactor: -3,
     });
     this.decalGeom = new THREE.CircleGeometry(1, 12).rotateX(-Math.PI / 2);
+    this.decalMats = new Map();
     this.decals = [];
 
     // A single light for the biggest flash on screen — cheaper than one each.
@@ -304,8 +305,15 @@ export class Effects {
   }
 
   addDecal(x, z, radius, opacity) {
-    const mat = this.decalMat.clone();
-    mat.opacity = opacity;
+    // A handful of shared materials, bucketed by opacity, rather than one per
+    // mark: a battle leaves hundreds of them.
+    const key = Math.round(opacity * 10);
+    let mat = this.decalMats.get(key);
+    if (!mat) {
+      mat = this.decalMat.clone();
+      mat.opacity = key / 10;
+      this.decalMats.set(key, mat);
+    }
     const m = new THREE.Mesh(this.decalGeom, mat);
     m.scale.setScalar(radius);
     m.position.set(x, 0, z);
@@ -315,8 +323,7 @@ export class Effects {
     // Keep the count bounded; the oldest marks fade out first.
     while (this.decals.length > 240) {
       const old = this.decals.shift();
-      this.decalGroup.remove(old.mesh);
-      old.mesh.material.dispose();
+      this.decalGroup.remove(old.mesh);      // the material is shared; keep it
     }
     return m;
   }

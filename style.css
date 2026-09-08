@@ -22,7 +22,7 @@ body {
    panels, which an `#hud > *` rule would win — and the crosshair sits dead in
    the middle of the screen, exactly where you click most. */
 #hud { position: fixed; inset: 0; pointer-events: none; }
-.hud-speed, .hud-calls, .hud-map, .hud-help { pointer-events: auto; }
+.hud-speed, .hud-calls, .hud-map, .hud-help, .hud-end { pointer-events: auto; }
 #marquee {
   position: fixed; display: none; pointer-events: none;
   border: 1px solid #a8e39a; background: rgba(150, 220, 140, 0.13);
@@ -186,3 +186,28 @@ body {
 .hud-help td:last-child { color: var(--dim); }
 .hud-help .dismiss { margin-top: 16px; font-size: 10px; letter-spacing: 0.1em; }
 .hud-help > * { max-width: 640px; }
+
+/* ---- end of battle ---------------------------------------------------- */
+.hud-end {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(8, 10, 8, 0.55); backdrop-filter: blur(1.5px);
+}
+.end-card {
+  min-width: 380px; text-align: center; padding: 26px 34px;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
+}
+.end-title { font-size: 34px; font-weight: 700; letter-spacing: 0.18em; }
+.end-card.won .end-title { color: var(--good); }
+.end-card.lost .end-title { color: var(--bad); }
+.end-sub { color: var(--dim); margin: 4px 0 16px; }
+.end-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px;
+  font-size: 11.5px; color: var(--dim); margin-bottom: 18px;
+}
+.end-stats b { color: var(--ink); font-size: 14px; margin-right: 4px; }
+.end-again {
+  font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; cursor: pointer;
+  color: #0e1a0c; background: var(--good); border: 0; border-radius: 3px; padding: 8px 20px;
+}
+.end-again:hover { filter: brightness(1.1); }
+.end-hint { margin-top: 10px; font-size: 9.5px; color: var(--dim); letter-spacing: 0.08em; }

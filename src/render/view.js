@@ -16,6 +16,11 @@ import { buildProp, buildWreckedProp } from './models/scenery.js';
 import { buildTerrainMesh, buildTerrainSkirt } from './terrain.js';
 import { clamp, angleDelta, DEG } from '../core/util.js';
 
+/** Burnt out: paint gone, everything one colour of scorched steel. */
+const GUTTED = new THREE.MeshLambertMaterial({ color: 0x2f2b27 });
+/** Knocked out but intact: the paint darkened, the markings still there. */
+const ABANDONED = new THREE.MeshLambertMaterial({ color: 0x5a564c, vertexColors: true });
+
 export class View {
   constructor(scene, battle) {
     this.scene = scene;
@@ -191,17 +196,15 @@ export class View {
 
     if (v.destroyed || v.abandoned) {
       // Wrecks sit dark and still.
-      if (!rec.burnt) {
+      if (!rec.burnt || (v.destroyed && !rec.gutted)) {
         rec.burnt = true;
+        rec.gutted = v.destroyed;
         // Scorched, not painted out: the shape has to stay readable so a wreck
         // can still be recognised as cover, or as something worth recrewing.
-        rec.root.traverse((o) => {
-          if (!o.isMesh || o.userData.charred) return;
-          o.userData.charred = true;
-          o.material = o.material.clone();
-          o.material.color = new THREE.Color(v.destroyed ? 0x2f2b27 : 0x4a463e);
-          o.material.vertexColors = !v.destroyed;
-        });
+        // Two shared materials do it — cloning one per mesh leaked hundreds
+        // of them over a long battle.
+        const mat = v.destroyed ? GUTTED : ABANDONED;
+        rec.root.traverse((o) => { if (o.isMesh) o.material = mat; });
       }
       if (v.turretBlownOff && rec.turret && !rec.turretThrown) {
         rec.turretThrown = true;
@@ -244,11 +247,7 @@ export class View {
     if (g.destroyed && !rec.burnt) {
       rec.burnt = true;
       rec.root.rotation.z = 0.35;
-      rec.root.traverse((o) => {
-        if (!o.isMesh) return;
-        o.material = o.material.clone();
-        o.material.color = new THREE.Color(0x2e2a26);
-      });
+      rec.root.traverse((o) => { if (o.isMesh) o.material = GUTTED; });
     }
   }
 

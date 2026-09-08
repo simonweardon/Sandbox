@@ -282,6 +282,73 @@ await page.click('.hud-speed .spd:nth-child(3)');
 await page.waitForTimeout(200);
 check('the speed buttons still take clicks', (await state(() => window.game.battle.speed)) === 2);
 
+// ---- A held to pan must not also arm an attack-move ------------------------
+{
+  const before = await state(() => ({ x: window.game.rig.focus.x, z: window.game.rig.focus.z }));
+  await page.keyboard.down('KeyA');
+  await page.waitForTimeout(600);
+  await page.keyboard.up('KeyA');
+  const panned = await state((b) => Math.hypot(window.game.rig.focus.x - b.x, window.game.rig.focus.z - b.z), before);
+  check('holding A pans the camera', panned > 1, `moved ${panned.toFixed(1)} m`);
+}
+
+// ---- Ctrl + right click is the attack-move ---------------------------------
+{
+  await state(() => {
+    const g = window.game;
+    const men = g.battle.world.entities.filter((e) => e.kind === 'soldier'
+      && e.faction === g.battle.playerSide && !e.inVehicle).slice(0, 3);
+    g.selection.set(men);
+    for (const m of men) { m.orders.length = 0; m.path = []; }
+  });
+  await page.keyboard.down('Control');
+  await page.mouse.click(640, 300, { button: 'right' });
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(300);
+  const kinds = await state(() => window.game.selection.units.map((u) => u.orders[0]?.type).filter(Boolean));
+  check('Ctrl + right click issues an attack-move',
+    kinds.length > 0 && kinds.every((k) => k === 'attackMove'), JSON.stringify(kinds));
+}
+
+// ---- the battle ends, and says so ------------------------------------------
+{
+  const result = await state(() => {
+    const g = window.game;
+    const red = g.spawn.commander(g.battle.playerSide);
+    g.battle.paused = true;
+    // Fight it out headlessly; 40 minutes of battle is more than enough.
+    for (let i = 0; i < 30 * 60 * 40 && !g.battle.over; i++) { g.battle.step(1 / 30); red.step(1 / 30); }
+    g.battle.paused = false;
+    return g.battle.over;
+  });
+  check('a battle actually reaches a conclusion', !!result, JSON.stringify(result));
+  await page.waitForTimeout(600);
+  const card = await state(() => ({
+    visible: window.game.hud.end.style.display !== 'none',
+    text: window.game.hud.end.innerText,
+  }));
+  check('and the end card tells the player', card.visible
+    && /VICTORY|DEFEAT/.test(card.text) && /knocked out/.test(card.text),
+    card.text.slice(0, 60));
+  check('the end card names the right result',
+    result && card.text.startsWith(result.winner === 'sov' ? 'VICTORY' : 'DEFEAT'));
+
+  // ---- and nothing leaked getting there ------------------------------------
+  const mem = await state(() => {
+    const g = window.game;
+    const mats = new Set();
+    let meshes = 0;
+    g.scene.traverse((o) => { if (o.isMesh) { meshes++; mats.add(o.material); } });
+    return { mats: mats.size, meshes, geoms: g.renderer.info.memory.geometries,
+             corpses: g.battle.world.corpses.length };
+  });
+  // A whole battle's worth of wrecks, bodies and shell craters used to clone a
+  // material apiece — hundreds of them, none ever released.
+  check('materials stay bounded over a whole battle', mem.mats < 40,
+    `${mem.mats} materials for ${mem.meshes} meshes, ${mem.corpses} bodies`);
+  check('geometries stay bounded too', mem.geoms < 400, `${mem.geoms} geometries`);
+}
+
 await page.screenshot({ path: path.join(ROOT, 'test', 'browser-final-frame.png') });
 await browser.close();
 stop();
