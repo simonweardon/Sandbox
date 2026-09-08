@@ -13,7 +13,7 @@ import { buildVehicle } from './models/vehicle.js';
 import { buildSoldier, poseSoldier, buildCorpse } from './models/soldier.js';
 import { buildGunModel } from './models/gun.js';
 import { buildProp, buildWreckedProp } from './models/scenery.js';
-import { buildTerrainMesh, buildTerrainSkirt } from './terrain.js';
+import { buildTerrainMesh, buildTerrainSkirt, buildGroundClutter } from './terrain.js';
 import { clamp, angleDelta, DEG } from '../core/util.js';
 
 /** Burnt out: paint gone, everything one colour of scorched steel. */
@@ -39,6 +39,10 @@ export class View {
     scene.add(buildTerrainSkirt(this.world.terrain));
 
     this.buildScenery();
+    // Clutter goes on after the scenery, so it knows what not to sprout through.
+    // A phone gets fewer of them: it is fill rate, not triangles, that costs.
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    scene.add(buildGroundClutter(this.world.terrain, this.world, { count: coarse ? 2600 : 7000 }));
     this.buildFlags();
     this.buildSelectionPool();
   }

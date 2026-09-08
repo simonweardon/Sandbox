@@ -219,6 +219,14 @@ when the page loads, painted into vertex colours and merged down so that a
 hundred and fifty units cost a few hundred draw calls rather than a few
 thousand.
 
+The ground is the same idea. Its grain is a tiling texture drawn into a canvas
+at load time from wrapped value noise at three scales, multiplied over vertex
+colours that carry the terrain type and vary at three more. On top of that go
+several thousand tufts, stones and pieces of brick, clustered into patches
+rather than scattered evenly, because ground cover grows in patches — all of
+it in three InstancedMesh draw calls, and thinned out on a phone where fill
+rate costs more than triangles.
+
 The vehicle builder reads the same record the simulation does. A hull is lofted
 through the profile its own armour table describes, so a T-34 comes out with
 steeply sloped sides and a Tiger comes out slab-sided because that is what

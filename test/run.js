@@ -23,6 +23,8 @@ import { Battle, TICK } from '../src/sim/battle.js';
 import { Commander } from '../src/sim/ai.js';
 import { eyeHeight, signature } from '../src/sim/vision.js';
 import { DEG } from '../src/core/util.js';
+import * as THREE from '../vendor/three.module.js';
+import { CameraRig } from '../src/input/camera.js';
 import { reseed } from '../src/core/rng.js';
 
 let passed = 0, failed = 0;
@@ -335,6 +337,95 @@ test('pathfinding is fast enough to run on demand', () => {
   }
   const per = (Date.now() - t0) / 60;
   assert(per < 25, `paths took ${per.toFixed(1)} ms each, which is too slow`);
+});
+
+console.log('The camera');
+test('panning goes the way the player pushed it', () => {
+  // Direction, not just distance. Asserting only that the camera moved is what
+  // let left and right stay swapped through three rounds of testing.
+  const t = new Terrain(512, 1);
+  t.height.fill(0);
+  const cam = new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000);
+  const rig = new CameraRig(cam, t);
+  rig.focus.set(256, 0, 256);
+  rig.pitch = 50 * DEG;
+  rig.distance = rig.targetDistance = 60;
+
+  for (const yaw of [0, 0.9, -1.7, 2.6]) {
+    rig.yaw = yaw;
+    // Put the focus back before each probe: the previous iteration's pans
+    // moved it, and the probe measures points around a fixed spot.
+    rig.focus.set(256, 0, 256);
+    rig.glide = null;
+    rig.update(0.016, null);
+    // project() reads matrixWorldInverse, which nothing has recomputed outside
+    // a render — without this the probe is measured against a stale camera.
+    cam.updateMatrixWorld(true);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+
+    // Establish which way screen-right actually is, by projecting a point.
+    const probe = (dx, dz) => {
+      const v = new THREE.Vector3(256 + dx, 0, 256 + dz).project(cam);
+      return v.x;
+    };
+    const { rx, rz } = rig.basis();
+    assert(probe(rx * 20, rz * 20) > 0.05,
+      `at yaw ${yaw.toFixed(1)} the basis's screen-right does not project to the right`);
+
+    // Dragging right must carry the ground right, which means the camera goes
+    // the other way: minus screen-right.
+    rig.focus.set(256, 0, 256);
+    rig.glide = null;
+    rig.panScreen(100, 0, 720);
+    const mx = rig.focus.x - 256, mz = rig.focus.z - 256;
+    assert(mx * rx + mz * rz < 0, `at yaw ${yaw.toFixed(1)} a rightward drag moved the camera the wrong way`);
+
+    // Dragging down brings the ground towards you: the camera goes forward.
+    const { fx, fz } = rig.basis();
+    rig.focus.set(256, 0, 256);
+    rig.panScreen(0, 100, 720);
+    const dx2 = rig.focus.x - 256, dz2 = rig.focus.z - 256;
+    assert(dx2 * fx + dz2 * fz > 0, `at yaw ${yaw.toFixed(1)} a downward drag did not move the camera forward`);
+
+    // And the keys agree with the drag: D slides the view right.
+    rig.focus.set(256, 0, 256);
+    rig.pan(0, 1, 1);
+    const kx = rig.focus.x - 256, kz = rig.focus.z - 256;
+    assert(kx * rx + kz * rz > 0, `at yaw ${yaw.toFixed(1)} pressing D did not move the camera right`);
+
+    rig.focus.set(256, 0, 256);
+    rig.pan(1, 0, 1);
+    const wx = rig.focus.x - 256, wz = rig.focus.z - 256;
+    assert(wx * fx + wz * fz > 0, `at yaw ${yaw.toFixed(1)} pressing W did not move the camera forward`);
+  }
+});
+test('a flick carries the camera the same way the drag did', () => {
+  const t = new Terrain(512, 1);
+  t.height.fill(0);
+  const cam = new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000);
+  const rig = new CameraRig(cam, t);
+  rig.focus.set(256, 0, 256);
+  rig.pitch = 50 * DEG;
+  rig.distance = rig.targetDistance = 60;
+  rig.yaw = 0.7;
+  rig.update(0.016, null);
+
+  rig.panScreen(60, 0, 720);
+  const dragX = rig.focus.x - 256, dragZ = rig.focus.z - 256;
+  rig.focus.set(256, 0, 256);
+  rig.fling(600, 0, 720);
+  assert(rig.glide, 'a flick should set the camera gliding');
+  const dot = rig.glide.x * dragX + rig.glide.z * dragZ;
+  assert(dot > 0, 'the glide runs opposite to the drag that started it');
+});
+test('the minimap jump puts the camera where it was asked', () => {
+  const t = new Terrain(512, 1);
+  const cam = new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000);
+  const rig = new CameraRig(cam, t);
+  rig.jumpTo(400, 120);
+  assertBetween(rig.focus.x, 399, 401, 'jump x');
+  assertBetween(rig.focus.z, 119, 121, 'jump z');
+  assert(!rig.glide, 'a jump should cancel any glide');
 });
 
 console.log('A whole battle');

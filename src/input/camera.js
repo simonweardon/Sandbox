@@ -17,13 +17,26 @@ export class CameraRig {
     this.followYaw = 0;
   }
 
+  /**
+   * The camera's own axes on the ground.
+   *
+   * `update` places the camera at focus - (sin yaw, ., cos yaw) * r looking at
+   * the focus, so forward is (sin yaw, cos yaw) and screen-right, being
+   * forward crossed with up, is (-cos yaw, sin yaw). Getting that cross
+   * product backwards is what made left and right swap.
+   */
+  basis() {
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    return { fx: s, fz: c, rx: -c, rz: s };
+  }
+
   /** Pan in the direction the camera is facing, not along the world axes. */
   pan(forward, right, dt) {
     this.glide = null;
     const speed = clamp(this.distance * 0.9, 24, 220) * dt;
-    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
-    this.focus.x += (s * forward + c * right) * speed;
-    this.focus.z += (c * forward - s * right) * speed;
+    const { fx, fz, rx, rz } = this.basis();
+    this.focus.x += (fx * forward + rx * right) * speed;
+    this.focus.z += (fz * forward + rz * right) * speed;
     this.clampFocus();
   }
 
@@ -35,24 +48,26 @@ export class CameraRig {
    */
   panScreen(dxPx, dyPx, viewportH, fovDeg = 48) {
     const groundPerPx = (2 * this.distance * Math.tan((fovDeg / 2) * DEG)) / viewportH;
-    const across = groundPerPx;
-    const along = groundPerPx / Math.max(0.35, Math.sin(this.pitch));
-    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
-    const dx = dxPx * across, dy = dyPx * along;
-    this.focus.x -= c * dx - s * dy;
-    this.focus.z -= -s * dx - c * dy;
+    const dx = dxPx * groundPerPx;
+    const dy = dyPx * (groundPerPx / Math.max(0.35, Math.sin(this.pitch)));
+    const { fx, fz, rx, rz } = this.basis();
+    // Finger right: the ground should go right, so the camera goes left, which
+    // is minus screen-right. Finger down: the ground comes towards you, so the
+    // camera goes forward.
+    this.focus.x += -rx * dx + fx * dy;
+    this.focus.z += -rz * dx + fz * dy;
     this.clampFocus();
   }
 
   /** A flick keeps going, so crossing the map does not mean ten short drags. */
   fling(vxPx, vyPx, viewportH, fovDeg = 48) {
     const groundPerPx = (2 * this.distance * Math.tan((fovDeg / 2) * DEG)) / viewportH;
-    const along = groundPerPx / Math.max(0.35, Math.sin(this.pitch));
-    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
-    const dx = vxPx * groundPerPx, dy = vyPx * along;
+    const dx = vxPx * groundPerPx;
+    const dy = vyPx * (groundPerPx / Math.max(0.35, Math.sin(this.pitch)));
+    const { fx, fz, rx, rz } = this.basis();
     this.glide = {
-      x: -(c * dx - s * dy),
-      z: -(-s * dx - c * dy),
+      x: -rx * dx + fx * dy,
+      z: -rz * dx + fz * dy,
     };
   }
 
