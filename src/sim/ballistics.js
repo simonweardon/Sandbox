@@ -244,7 +244,7 @@ function traceSegment(world, p) {
   }
 
   // Scenery: trees stop bullets, walls stop most things.
-  for (const prop of world.props) {
+  for (const prop of world.propsNearSegment(ax, az, bx, bz, 8)) {
     if (!prop.alive || !prop.blocksMove) continue;
     const d2 = pointSegDist2(prop.x, prop.z, ax, az, bx, bz);
     const r = prop.type === 'house' ? prop.radius : prop.radius * 0.6;
@@ -334,19 +334,22 @@ function hitVehicle(world, p, hit, v) {
   const spaced = !!v.def.model.schurzen && facet.key.startsWith('hullSide');
   const res = resolveArmour(w, p.shell === 'bullet' ? SHELL.BULLET : p.shell, p.travelled, facet.plate, angle, { spaced });
 
-  const label = `${v.def.short}: ${describeImpact(res, facet.key)}`;
+  // A truck has no armour to describe, so do not narrate the shot as though
+  // it were a duel between tanks.
+  const armoured = (facet.plate?.t ?? 0) > 0;
+  const label = armoured ? `${v.def.short}: ${describeImpact(res, facet.key)}` : null;
 
   if (res.result === RESULT.RICOCHET) {
     v.shock = (v.shock || 0) + 0.15;
     world.fx('ricochet', { x: hit.x, y: hit.y, z: hit.z, nx: dir.x, nz: dir.z });
-    if (p.shell !== 'bullet') world.logLine(label, 'bounce');
+    if (label && p.shell !== 'bullet') world.logLine(label, 'bounce');
     // The shell carries on somewhere else entirely.
     if (w.he > 0.05 && roll() < 0.4) burst(world, p, hit.x, hit.y + 0.5, hit.z, null);
     return;
   }
   if (res.result === RESULT.BOUNCE || res.result === RESULT.PARTIAL) {
     world.fx('ricochet', { x: hit.x, y: hit.y, z: hit.z, nx: dir.x, nz: dir.z });
-    if (p.shell !== 'bullet') world.logLine(label, 'bounce');
+    if (label && p.shell !== 'bullet') world.logLine(label, 'bounce');
     if (res.result === RESULT.PARTIAL) {
       v.shock = (v.shock || 0) + 0.4;
       // The crew are rattled even though the plate held.
@@ -363,7 +366,7 @@ function hitVehicle(world, p, hit, v) {
   // Through the armour.
   v.shock = (v.shock || 0) + (res.result === RESULT.OVERPENETRATION ? 0.6 : 1.0);
   world.fx('penetration', { x: hit.x, y: hit.y, z: hit.z });
-  if (p.shell !== 'bullet') world.logLine(label, 'pen');
+  if (label && p.shell !== 'bullet') world.logLine(label, 'pen');
   const entry = { x: lx, y: ly, z: lz };
   applySpall(world, v, entry, dir, res.spallEnergy, w, p.owner);
   // HE and HEAT add their filler to whatever the penetrator did.

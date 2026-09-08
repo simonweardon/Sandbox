@@ -11,6 +11,7 @@ import { clamp, dist2, pointSegDist2, DEG } from '../core/util.js';
 export const KIND = { SOLDIER: 'soldier', VEHICLE: 'vehicle', GUN: 'gun', PROP: 'prop', CRATE: 'crate' };
 
 const HASH_CELL = 16;
+const PROP_CELL = 16;
 
 export class World {
   constructor(sizeM = 512, seed = 20240607) {
@@ -29,9 +30,14 @@ export class World {
     this.time = 0;
     this.tick = 0;
     this.hash = new Map();
+    this.propGrid = new Map();      // static scenery, indexed once and patched
     this.factions = {};
     this.corpses = [];
     this.decals = [];
+    this.byFaction = {};
+    this._propStamp = 0;
+    this._losScratch = [];
+    this._coverScratch = [];
   }
 
   // ---- entity plumbing --------------------------------------------------
@@ -55,13 +61,45 @@ export class World {
 
   rebuildHash() {
     this.hash.clear();
+    for (const list of Object.values(this.byFaction)) list.length = 0;
     for (const e of this.entities) {
       if (!e.alive) continue;
       const k = this.key(e.x, e.z);
       let b = this.hash.get(k);
       if (!b) this.hash.set(k, (b = []));
       b.push(e);
+      if (e.faction) {
+        let f = this.byFaction[e.faction];
+        if (!f) f = this.byFaction[e.faction] = [];
+        f.push(e);
+      }
     }
+  }
+
+  /**
+   * Everything hostile to `faction` within `r`, nearest first.
+   *
+   * Spotting and target acquisition both ask this over ranges of several
+   * hundred metres, which covers most of the map — at that size walking the
+   * hash costs thousands of cell lookups, so it is cheaper to scan the other
+   * side's unit list directly and measure.
+   */
+  enemiesWithin(x, z, r, faction, limit = 0, out = []) {
+    out.length = 0;
+    const r2 = r * r;
+    for (const side of Object.keys(this.byFaction)) {
+      if (side === faction) continue;
+      for (const e of this.byFaction[side]) {
+        if (!e.alive) continue;
+        const d2 = dist2(x, z, e.x, e.z);
+        if (d2 > r2) continue;
+        e._d2 = d2;
+        out.push(e);
+      }
+    }
+    out.sort((a, b) => a._d2 - b._d2);
+    if (limit && out.length > limit) out.length = limit;
+    return out;
   }
 
   /** Everything within `r` metres of (x,z), optionally filtered. */
@@ -91,13 +129,74 @@ export class World {
     p.alive = true;
     p.hp = p.hp ?? 100;
     this.props.push(p);
+    this.indexProp(p);
     return p;
+  }
+
+  /**
+   * Scenery is indexed into a coarse grid once, because line of sight and every
+   * projectile step ask "what is along this line" thousands of times a second
+   * and walking all four hundred props each time is not affordable.
+   */
+  indexProp(p) {
+    const r = p.radius + (p.len ? p.len / 2 : 0);
+    const i0 = ((p.x - r) / PROP_CELL) | 0, i1 = ((p.x + r) / PROP_CELL) | 0;
+    const j0 = ((p.z - r) / PROP_CELL) | 0, j1 = ((p.z + r) / PROP_CELL) | 0;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const k = i * 8192 + j;
+        let b = this.propGrid.get(k);
+        if (!b) this.propGrid.set(k, (b = []));
+        b.push(p);
+      }
+    }
+  }
+
+  /** Props whose footprint could touch the segment a->b, without duplicates. */
+  propsNearSegment(ax, az, bx, bz, pad = 0, out = []) {
+    out.length = 0;
+    const stamp = ++this._propStamp;
+    const minX = Math.min(ax, bx) - pad, maxX = Math.max(ax, bx) + pad;
+    const minZ = Math.min(az, bz) - pad, maxZ = Math.max(az, bz) + pad;
+    const i0 = (minX / PROP_CELL) | 0, i1 = (maxX / PROP_CELL) | 0;
+    const j0 = (minZ / PROP_CELL) | 0, j1 = (maxZ / PROP_CELL) | 0;
+    // A long diagonal sweep would pull in most of the map, so walk the line's
+    // cells rather than its bounding box when the box gets big.
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 96) {
+      const steps = Math.ceil(Math.hypot(bx - ax, bz - az) / (PROP_CELL * 0.6)) + 1;
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const ci = ((ax + (bx - ax) * t) / PROP_CELL) | 0;
+        const cj = ((az + (bz - az) * t) / PROP_CELL) | 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            const b = this.propGrid.get((ci + di) * 8192 + (cj + dj));
+            if (!b) continue;
+            for (const p of b) { if (p._stamp !== stamp) { p._stamp = stamp; out.push(p); } }
+          }
+        }
+      }
+      return out;
+    }
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const b = this.propGrid.get(i * 8192 + j);
+        if (!b) continue;
+        for (const p of b) { if (p._stamp !== stamp) { p._stamp = stamp; out.push(p); } }
+      }
+    }
+    return out;
+  }
+
+  /** Props within `r` of a point. */
+  propsNearPoint(x, z, r, out = []) {
+    return this.propsNearSegment(x, z, x, z, r, out);
   }
 
   /** Props whose footprint the segment a->b passes through. */
   propsAlong(ax, az, bx, bz, pad = 0) {
     const hits = [];
-    for (const p of this.props) {
+    for (const p of this.propsNearSegment(ax, az, bx, bz, pad + 4)) {
       if (!p.alive || !p.blocksLos) continue;
       const r = p.radius + pad;
       if (pointSegDist2(p.x, p.z, ax, az, bx, bz) <= r * r) hits.push(p);
@@ -113,7 +212,7 @@ export class World {
     const g = this.terrain.losBlocked(ax, ay, az, bx, by, bz);
     if (g) return { kind: 'terrain', ...g };
     const len = Math.hypot(bx - ax, bz - az) || 1;
-    for (const p of this.props) {
+    for (const p of this.propsNearSegment(ax, az, bx, bz, 3, this._losScratch)) {
       if (!p.alive || !p.blocksLos || p === ignore) continue;
       const d2 = pointSegDist2(p.x, p.z, ax, az, bx, bz);
       if (d2 > p.radius * p.radius) continue;
@@ -136,7 +235,7 @@ export class World {
     const dx = fromX - x, dz = fromZ - z;
     const len = Math.hypot(dx, dz) || 1;
     const nx = dx / len, nz = dz / len;
-    for (const p of this.props) {
+    for (const p of this.propsNearPoint(x, z, 4, this._coverScratch)) {
       if (!p.alive || !p.cover) continue;
       const d = Math.hypot(p.x - x, p.z - z);
       if (d > p.radius + 2.2) continue;

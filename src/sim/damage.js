@@ -81,17 +81,31 @@ export function suppressNear(world, x, z, radius, power, faction) {
 // Vehicles
 // ---------------------------------------------------------------------------
 
+/** Wheeled vehicles lose wheels, not tracks — and a truck has no gun to lose. */
+function partName(v, id) {
+  const wheeled = !!v.def.model.wheeled;
+  if (id === 'trackL') return wheeled ? 'front axle' : 'left track';
+  if (id === 'trackR') return wheeled ? 'rear axle' : 'right track';
+  return id;
+}
+
 const COMPONENT_EFFECT = {
   engine: (v, w) => { v.engineDead = true; v.smoking = Math.max(v.smoking, 8); w.logLine(`${v.def.short} — engine wrecked`, 'hit'); },
   transmission: (v, w) => { v.immobile = true; w.logLine(`${v.def.short} — transmission destroyed`, 'hit'); },
-  gunBreech: (v, w) => { v.gunBroken = true; w.logLine(`${v.def.short} — main gun disabled`, 'hit'); },
-  turretRing: (v, w) => { v.turretJammed = true; w.logLine(`${v.def.short} — turret ring jammed`, 'hit'); },
+  gunBreech: (v, w) => {
+    v.gunBroken = true;
+    if (v.guns.length) w.logLine(`${v.def.short} — main gun disabled`, 'hit');
+  },
+  turretRing: (v, w) => {
+    v.turretJammed = true;
+    if (v.def.model.turret) w.logLine(`${v.def.short} — turret ring jammed`, 'hit');
+  },
   optics: (v, w) => { v.opticsOut = true; },
   radio: () => {},
   fuel: (v, w) => { v.onFire = Math.max(v.onFire, 26); w.logLine(`${v.def.short} — fuel tank ruptured, burning`, 'kill'); },
   ammoRack: (v, w) => { detonate(w, v); },
-  trackL: (v, w) => { v.immobile = true; w.logLine(`${v.def.short} — left track blown off`, 'hit'); },
-  trackR: (v, w) => { v.immobile = true; w.logLine(`${v.def.short} — right track blown off`, 'hit'); },
+  trackL: (v, w) => { v.immobile = true; w.logLine(`${v.def.short} — ${partName(v, 'trackL')} blown off`, 'hit'); },
+  trackR: (v, w) => { v.immobile = true; w.logLine(`${v.def.short} — ${partName(v, 'trackR')} blown off`, 'hit'); },
 };
 
 export function hurtComponent(world, v, comp, dmg) {
@@ -301,7 +315,7 @@ export function explode(world, x, y, z, kgTnt, weapon, faction, source = null) {
   }
 
   // Scenery: HE knocks down walls, fences and trees.
-  for (const p of world.props) {
+  for (const p of world.propsNearPoint(x, z, r * 1.1 + 8)) {
     if (!p.alive || !p.destructible) continue;
     const d = Math.hypot(p.x - x, p.z - z);
     if (d > r * 1.1) continue;
