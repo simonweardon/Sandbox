@@ -1,26 +1,34 @@
-/*
- * A very small static file server — enough to put the game online, with no
- * dependencies to install.
- */
+// A small static file server — enough to put the game online, no dependencies.
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-const ROOT = __dirname;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
-  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 const server = http.createServer((req, res) => {
-  const requested = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  let requested;
+  try {
+    requested = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  } catch {
+    res.writeHead(400).end('Bad request');
+    return;
+  }
   const filePath = path.join(ROOT, requested === '/' ? 'index.html' : requested);
 
   // Never serve anything outside the project directory, whatever the path says.
@@ -40,4 +48,4 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`Pixel Route 1 serving on :${PORT}`));
+server.listen(PORT, () => console.log(`Direct Control serving on :${PORT}`));

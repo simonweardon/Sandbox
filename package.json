@@ -1,13 +1,13 @@
 {
-  "name": "pixel-route-1",
-  "version": "1.0.0",
+  "name": "direct-control",
+  "version": "0.1.0",
   "private": true,
-  "description": "A top-down pixel game in the style of the Game Boy Pokemon titles",
+  "type": "module",
+  "description": "A real-time tactics game in the Men of War mould: direct control, real ballistics, armour penetration and finite ammunition",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run.js"
   },
-  "engines": {
-    "node": ">=18"
-  }
+  "engines": { "node": ">=18" }
 }
