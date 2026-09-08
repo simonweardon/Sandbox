@@ -154,6 +154,81 @@ await page.waitForTimeout(300);
 const d1 = await state(() => window.game.rig.targetDistance);
 check('pinching zooms', Math.abs(d1 - d0) > 2, `${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
 
+// ---- getting around the map ------------------------------------------------
+{
+  // A drag should move the ground roughly with the finger, not creep.
+  await state(() => { window.game.battle.paused = true; window.game.rig.glide = null; });
+  const f0 = await state(() => ({ x: window.game.rig.focus.x, z: window.game.rig.focus.z, d: window.game.rig.distance }));
+  await page.evaluate(() => {
+    const c = document.getElementById('view');
+    const mk = (t, x, y) => c.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: 71, pointerType: 'touch', clientX: x, clientY: y }));
+    mk('pointerdown', 200, 500);
+    for (let i = 1; i <= 10; i++) mk('pointermove', 200, 500 - i * 30);
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 71, pointerType: 'touch', clientX: 200, clientY: 200 }));
+  });
+  await page.waitForTimeout(200);
+  const moved = await state((f) => Math.hypot(window.game.rig.focus.x - f.x, window.game.rig.focus.z - f.z), f0);
+  // 300 px of drag on a 727 px screen at this zoom should be tens of metres.
+  check('a drag moves the map a useful distance', moved > 25, `${moved.toFixed(0)} m for 300 px`);
+
+  // Tapping the minimap jumps the camera there.
+  await state(() => { window.game.rig.glide = null; });
+  const before = await state(() => ({ x: window.game.rig.focus.x, z: window.game.rig.focus.z }));
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('.hud-map canvas').getBoundingClientRect();
+    return { x: r.left + r.width * 0.8, y: r.top + r.height * 0.2 };
+  });
+  await page.touchscreen.tap(box.x, box.y);
+  await page.waitForTimeout(300);
+  const jumped = await state((b) => Math.hypot(window.game.rig.focus.x - b.x, window.game.rig.focus.z - b.z), before);
+  check('tapping the minimap jumps the camera', jumped > 40, `${jumped.toFixed(0)} m`);
+
+  // And it is drawn with your own end at the bottom.
+  check('the minimap is the same way round as the view',
+    await state(() => {
+      const g = window.game;
+      const home = g.battle.world.flags.find((f) => f.owner === g.battle.playerSide);
+      return !home || g.hud.mapFlipped === (home.z < g.battle.world.size / 2);
+    }));
+}
+
+// ---- mass selection --------------------------------------------------------
+{
+  await state(() => { window.game.selection.clear(); window.game.battle.paused = false; });
+  await page.tap('.hud-touch button[data-act="all"]');
+  await page.waitForTimeout(300);
+  const n = await state(() => window.game.selection.units.length);
+  check('the All button selects the whole force', n > 8, `${n} selected`);
+
+  await state(() => window.game.selection.clear());
+  await page.tap('.hud-touch button[data-act="box"]');
+  await page.waitForTimeout(200);
+  check('the Box button arms a marquee', await state(() => window.game.touch.boxing));
+  // Centre on our own men, then drag a box round them.
+  await state(() => {
+    const g = window.game;
+    const men = g.battle.world.entities.filter((e) => e.kind === 'soldier'
+      && e.faction === g.battle.playerSide && !e.inVehicle);
+    const cx = men.reduce((a, e) => a + e.x, 0) / men.length;
+    const cz = men.reduce((a, e) => a + e.z, 0) / men.length;
+    g.rig.jumpTo(cx, cz);
+    g.rig.targetDistance = g.rig.distance = 70;
+  });
+  // Let the camera settle before boxing: under software rendering the lerp
+  // needs a few frames, and a half-moved camera boxes empty ground.
+  await page.waitForTimeout(1600);
+  await page.evaluate(() => {
+    const c = document.getElementById('view');
+    const mk = (t, x, y) => c.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: 72, pointerType: 'touch', clientX: x, clientY: y }));
+    mk('pointerdown', 40, 120);
+    for (let i = 1; i <= 8; i++) mk('pointermove', 40 + i * 38, 120 + i * 60);
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 72, pointerType: 'touch', clientX: 344, clientY: 600 }));
+  });
+  await page.waitForTimeout(300);
+  const boxed = await state(() => window.game.selection.units.length);
+  check('dragging a box selects several units', boxed > 1, `${boxed} selected`);
+}
+
 // ---- direct control on a touchscreen --------------------------------------
 await state(() => {
   const g = window.game;

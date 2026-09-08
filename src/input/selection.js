@@ -85,6 +85,17 @@ export class Selection {
     return best;
   }
 
+  /** Everything of yours that is on its feet — the "select my army" button. */
+  selectAll(kinds = null) {
+    const list = this.battle.world.entities.filter((e) => e.faction === this.side
+      && !(e.kind === KIND.SOLDIER && e.inVehicle)
+      && !(e.kind === KIND.VEHICLE && (e.destroyed || e.abandoned))
+      && !(e.kind === KIND.GUN && e.destroyed)
+      && (!kinds || kinds.includes(e.kind)));
+    this.set(list);
+    return list.length;
+  }
+
   selectSameType(unit) {
     const list = this.battle.world.entities.filter((e) =>
       e.faction === this.side && e.kind === unit.kind &&

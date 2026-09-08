@@ -24,20 +24,28 @@ function weaponGeometry(key) {
   const parts = [];
   switch (w.cls) {
     case 'rifle':
-      parts.push(box(0.045, 0.075, 0.72, WOOD, { z: 0.02 }));
-      parts.push(cyl(0.011, 0.011, 0.62, 6, GUNMETAL, { z: 0.42, rx: 90 * D }));
-      parts.push(box(0.04, 0.05, 0.16, shade(WOOD, -0.15), { y: -0.045, z: -0.28, rx: 12 * D }));
+      parts.push(box(0.052, 0.085, 0.74, WOOD, { z: 0.02 }));
+      parts.push(cyl(0.016, 0.016, 0.66, 8, GUNMETAL, { z: 0.44, rx: 90 * D }));
+      parts.push(box(0.046, 0.058, 0.18, shade(WOOD, -0.15), { y: -0.05, z: -0.30, rx: 12 * D }));
+      parts.push(box(0.03, 0.05, 0.10, shade(GUNMETAL, 0.05), { y: 0.055, z: -0.02 }));  // bolt
+      parts.push(box(0.02, 0.035, 0.03, GUNMETAL, { y: 0.075, z: 0.70 }));               // foresight
+      parts.push(box(0.012, 0.05, 0.24, shade(0x4a3a28, 0), { x: 0.04, y: -0.02, z: 0.1 })); // sling
       break;
     case 'smg':
-      parts.push(box(0.05, 0.07, 0.36, GUNMETAL, { z: 0.04 }));
-      parts.push(cyl(0.012, 0.012, 0.3, 6, GUNMETAL, { z: 0.3, rx: 90 * D }));
-      parts.push(box(0.03, 0.2, 0.05, shade(GUNMETAL, 0.1), { y: -0.12, z: 0.02 }));   // magazine
-      parts.push(box(0.03, 0.05, 0.22, shade(GUNMETAL, -0.1), { y: -0.02, z: -0.24 }));
+      parts.push(box(0.058, 0.082, 0.38, GUNMETAL, { z: 0.04 }));
+      parts.push(cyl(0.017, 0.017, 0.32, 8, GUNMETAL, { z: 0.32, rx: 90 * D }));
+      parts.push(box(0.036, 0.22, 0.06, shade(GUNMETAL, 0.1), { y: -0.13, z: 0.02 }));  // magazine
+      parts.push(box(0.034, 0.06, 0.24, shade(GUNMETAL, -0.1), { y: -0.02, z: -0.25 }));
+      parts.push(box(0.045, 0.04, 0.09, shade(GUNMETAL, 0.14), { y: 0.05, z: -0.04 }));  // bolt housing
       break;
     case 'lmg':
-      parts.push(box(0.055, 0.085, 0.62, GUNMETAL, { z: 0.02 }));
-      parts.push(cyl(0.015, 0.015, 0.62, 6, shade(GUNMETAL, 0.06), { z: 0.44, rx: 90 * D }));
-      parts.push(box(0.05, 0.06, 0.2, WOOD, { z: -0.34 }));
+      parts.push(box(0.062, 0.095, 0.64, GUNMETAL, { z: 0.02 }));
+      parts.push(cyl(0.020, 0.020, 0.64, 8, shade(GUNMETAL, 0.06), { z: 0.46, rx: 90 * D }));
+      parts.push(box(0.056, 0.068, 0.22, WOOD, { z: -0.35 }));
+      // Cooling jacket, which is the silhouette that says machine gun.
+      for (let i = 0; i < 5; i++) {
+        parts.push(cyl(0.028, 0.028, 0.02, 8, shade(GUNMETAL, -0.15), { z: 0.28 + i * 0.08, rx: 90 * D }));
+      }
       // Bipod.
       for (const s of [-1, 1]) {
         parts.push(cyl(0.008, 0.008, 0.3, 5, GUNMETAL, { x: s * 0.07, y: -0.16, z: 0.5, rz: s * 14 * D }));
@@ -92,19 +100,33 @@ function buildTorso(faction, role) {
   const f = FACTIONS[faction] || FACTIONS.ger;
   const parts = [];
   const uniform = f.uniform;
-  // Chest and shoulders.
-  parts.push(box(0.38, 0.46, 0.22, uniform, { y: 0.28 }));
-  parts.push(box(0.42, 0.1, 0.24, shade(uniform, -0.05), { y: 0.46 }));
-  // Webbing and belt.
-  parts.push(box(0.4, 0.05, 0.24, f.gear, { y: 0.1 }));
-  parts.push(box(0.07, 0.34, 0.02, f.gear, { x: -0.08, y: 0.3, z: 0.115 }));
-  parts.push(box(0.07, 0.34, 0.02, f.gear, { x: 0.08, y: 0.3, z: 0.115 }));
-  // Ammunition pouches.
-  for (const s of [-1, 1]) parts.push(box(0.11, 0.11, 0.07, shade(f.gear, 0.08), { x: s * 0.11, y: 0.12, z: 0.13 }));
-  // Pack and entrenching tool on the back.
-  parts.push(box(0.28, 0.26, 0.14, shade(f.gear, 0.1), { y: 0.3, z: -0.16 }));
+  // Chest, tapered to the waist, with the shoulders sitting proud of it.
+  parts.push(box(0.36, 0.30, 0.21, uniform, { y: 0.34 }));
+  parts.push(box(0.32, 0.20, 0.19, shade(uniform, -0.03), { y: 0.14 }));
+  parts.push(box(0.44, 0.11, 0.23, shade(uniform, -0.06), { y: 0.48 }));
+  // Collar and the tunic's front seam.
+  parts.push(box(0.20, 0.07, 0.20, shade(uniform, -0.14), { y: 0.53 }));
+  parts.push(box(0.03, 0.34, 0.02, shade(uniform, -0.16), { y: 0.32, z: 0.108 }));
+  // Shoulder boards, which is most of what tells a rank apart at a distance.
+  for (const sd of [-1, 1]) {
+    parts.push(box(0.10, 0.045, 0.16, shade(uniform, role === 'officer' ? 0.22 : -0.12),
+      { x: sd * 0.17, y: 0.53 }));
+  }
+  // Belt, braces and pouches.
+  parts.push(box(0.38, 0.055, 0.23, f.gear, { y: 0.10 }));
+  parts.push(box(0.055, 0.34, 0.02, f.gear, { x: -0.09, y: 0.32, z: 0.112 }));
+  parts.push(box(0.055, 0.34, 0.02, f.gear, { x: 0.09, y: 0.32, z: 0.112 }));
+  for (const sd of [-1, 1]) {
+    parts.push(box(0.115, 0.115, 0.075, shade(f.gear, 0.1), { x: sd * 0.115, y: 0.135, z: 0.132 }));
+    parts.push(box(0.10, 0.09, 0.06, shade(f.gear, -0.05), { x: sd * 0.175, y: 0.115, z: 0.06 }));
+  }
+  // Pack, mess tin and entrenching tool on the back.
+  parts.push(box(0.29, 0.27, 0.15, shade(f.gear, 0.12), { y: 0.33, z: -0.165 }));
+  parts.push(box(0.17, 0.13, 0.06, shade(f.gear, -0.08), { y: 0.22, z: -0.245 }));
+  parts.push(box(0.07, 0.19, 0.03, shade(0x3a3128, 0), { x: -0.15, y: 0.20, z: -0.20, rz: 8 * D }));
+  parts.push(cyl(0.055, 0.055, 0.17, 8, shade(f.gear, -0.12), { x: 0.16, y: 0.17, z: -0.19 }));
   if (role === 'lmg' || role === 'at') {
-    parts.push(cyl(0.05, 0.05, 0.3, 6, shade(f.gear, -0.1), { x: 0.16, y: 0.28, z: -0.2, rx: 12 * D }));
+    parts.push(cyl(0.05, 0.05, 0.32, 8, shade(f.gear, -0.1), { x: 0.17, y: 0.30, z: -0.22, rx: 12 * D }));
   }
   return merge(parts);
 }
@@ -112,32 +134,51 @@ function buildTorso(faction, role) {
 function buildHead(faction, role) {
   const f = FACTIONS[faction] || FACTIONS.ger;
   const parts = [];
-  parts.push(cyl(0.06, 0.07, 0.1, 8, f.skin, { y: -0.09 }));            // neck
-  parts.push(box(0.15, 0.19, 0.16, f.skin, { y: 0.03 }));               // head
+  parts.push(cyl(0.062, 0.072, 0.10, 8, f.skin, { y: -0.09 }));          // neck
+  parts.push(box(0.145, 0.17, 0.155, f.skin, { y: 0.035 }));             // head
+  parts.push(box(0.10, 0.05, 0.02, shade(f.skin, -0.28), { y: 0.045, z: 0.085 }));   // brow
+  parts.push(box(0.13, 0.035, 0.02, shade(f.skin, -0.16), { y: -0.03, z: 0.08 }));   // jaw
   const hc = role === 'officer' ? shade(f.helmet, -0.12) : f.helmet;
   for (const g of helmet(faction, hc)) parts.push(place(g, null, { y: 0.11 }));
+  // Chin strap.
+  parts.push(box(0.155, 0.02, 0.02, shade(f.gear, -0.1), { y: -0.025, z: 0.02 }));
+  if (role === 'sniper') {
+    // Scrim on the helmet, which is what a sniper reads as from above.
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      parts.push(box(0.07, 0.03, 0.05, shade(f.helmet, 0.16),
+        { x: Math.cos(a) * 0.1, y: 0.17, z: Math.sin(a) * 0.1, ry: a }));
+    }
+  }
   return merge(parts);
 }
 
 function buildLeg(faction, side) {
   const f = FACTIONS[faction] || FACTIONS.ger;
   const parts = [];
-  parts.push(box(0.15, 0.44, 0.16, f.uniform, { y: -0.22 }));
-  parts.push(box(0.15, 0.24, 0.17, shade(f.gear, -0.05), { y: -0.54 }));   // boot and gaiter
-  parts.push(box(0.16, 0.07, 0.24, 0x241f1a, { y: -0.63, z: 0.04 }));
+  parts.push(box(0.155, 0.26, 0.165, f.uniform, { y: -0.13 }));           // thigh
+  parts.push(box(0.135, 0.05, 0.155, shade(f.uniform, -0.12), { y: -0.27 })); // knee
+  parts.push(box(0.13, 0.22, 0.145, shade(f.uniform, -0.04), { y: -0.41 }));  // calf
+  parts.push(box(0.145, 0.20, 0.16, shade(f.gear, -0.05), { y: -0.57 }));     // gaiter
+  parts.push(box(0.15, 0.075, 0.15, 0x241f1a, { y: -0.66 }));                 // boot
+  parts.push(box(0.155, 0.06, 0.11, 0x1d1916, { y: -0.68, z: 0.09 }));        // toe
   return merge(parts);
 }
 
 function buildArms(faction, weaponKey) {
   const f = FACTIONS[faction] || FACTIONS.ger;
   const parts = [];
-  // Both arms brought forward on to the weapon.
-  for (const s of [-1, 1]) {
-    parts.push(box(0.12, 0.34, 0.13, f.uniform, { x: s * 0.22, y: -0.13, z: 0.07, rx: -28 * D }));
-    parts.push(box(0.1, 0.1, 0.1, f.skin, { x: s * 0.2, y: -0.29, z: 0.2 }));
+  // Both arms brought forward on to the weapon, with a break at the elbow so
+  // the pose reads as holding something rather than as two planks.
+  for (const sd of [-1, 1]) {
+    parts.push(box(0.115, 0.20, 0.125, f.uniform, { x: sd * 0.225, y: -0.07, z: 0.01, rx: -16 * D }));
+    parts.push(box(0.10, 0.055, 0.115, shade(f.uniform, -0.12), { x: sd * 0.22, y: -0.18, z: 0.05 }));
+    parts.push(box(0.098, 0.19, 0.11, shade(f.uniform, -0.04), { x: sd * 0.215, y: -0.27, z: 0.14, rx: -42 * D }));
+    parts.push(box(0.09, 0.085, 0.095, f.skin, { x: sd * 0.21, y: -0.35, z: 0.24 }));   // hand
+    parts.push(box(0.115, 0.05, 0.12, shade(f.uniform, -0.16), { x: sd * 0.225, y: 0.02, z: 0.0 })); // cuff
   }
   const w = weaponFor(weaponKey);
-  parts.push(place(w.clone(), null, { y: -0.24, z: 0.34 }));
+  parts.push(place(w.clone(), null, { y: -0.30, z: 0.36 }));
   return merge(parts);
 }
 
@@ -157,12 +198,22 @@ function bodyParts(faction, role, weaponKey) {
 }
 
 /**
+ * Infantry are drawn a third over life size. At the distance an RTS camera
+ * sits at, a man at true scale beside a six-metre tank is a speck you cannot
+ * pick out, let alone command; almost every game in the genre does this. Only
+ * the model is scaled — the simulation's hit boxes, stances and cover are all
+ * still 1.72 m of soldier.
+ */
+export const SOLDIER_SCALE = 1.34;
+
+/**
  * One soldier. `root` sits on the ground; `body` is everything above the hips
  * so a single rotation puts the whole man prone.
  */
 export function buildSoldier(faction, role, weaponKey) {
   const g = bodyParts(faction, role, weaponKey);
   const root = new THREE.Group();
+  root.scale.setScalar(SOLDIER_SCALE);
   const body = new THREE.Group();
   body.position.y = 0.86;
   root.add(body);

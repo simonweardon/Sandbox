@@ -19,6 +19,7 @@ export class CameraRig {
 
   /** Pan in the direction the camera is facing, not along the world axes. */
   pan(forward, right, dt) {
+    this.glide = null;
     const speed = clamp(this.distance * 0.9, 24, 220) * dt;
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
     this.focus.x += (s * forward + c * right) * speed;
@@ -26,11 +27,40 @@ export class CameraRig {
     this.clampFocus();
   }
 
-  panScreen(dxPx, dyPx, viewportH) {
-    const scale = (this.distance / viewportH) * 2.2;
+  /**
+   * Drag the ground itself: the point under the finger stays under the finger.
+   * The vertical component covers more ground than the horizontal because the
+   * camera is looking down at an angle, which is why a single scale factor
+   * always felt wrong — too slow one way, too fast the other.
+   */
+  panScreen(dxPx, dyPx, viewportH, fovDeg = 48) {
+    const groundPerPx = (2 * this.distance * Math.tan((fovDeg / 2) * DEG)) / viewportH;
+    const across = groundPerPx;
+    const along = groundPerPx / Math.max(0.35, Math.sin(this.pitch));
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
-    this.focus.x -= (c * dxPx - s * dyPx) * scale;
-    this.focus.z -= (-s * dxPx - c * dyPx) * scale;
+    const dx = dxPx * across, dy = dyPx * along;
+    this.focus.x -= c * dx - s * dy;
+    this.focus.z -= -s * dx - c * dy;
+    this.clampFocus();
+  }
+
+  /** A flick keeps going, so crossing the map does not mean ten short drags. */
+  fling(vxPx, vyPx, viewportH, fovDeg = 48) {
+    const groundPerPx = (2 * this.distance * Math.tan((fovDeg / 2) * DEG)) / viewportH;
+    const along = groundPerPx / Math.max(0.35, Math.sin(this.pitch));
+    const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    const dx = vxPx * groundPerPx, dy = vyPx * along;
+    this.glide = {
+      x: -(c * dx - s * dy),
+      z: -(-s * dx - c * dy),
+    };
+  }
+
+  /** Send the camera somewhere directly — used by the minimap. */
+  jumpTo(x, z) {
+    this.focus.x = x;
+    this.focus.z = z;
+    this.glide = null;
     this.clampFocus();
   }
 
@@ -54,6 +84,17 @@ export class CameraRig {
   update(dt, followUnit) {
     this.distance = lerp(this.distance, this.targetDistance, 1 - Math.pow(0.001, dt));
     this.shake = Math.max(0, this.shake - dt * 2.2);
+
+    // Coast to a stop after a flick.
+    if (this.glide) {
+      this.focus.x += this.glide.x * dt;
+      this.focus.z += this.glide.z * dt;
+      const decay = Math.pow(0.02, dt);
+      this.glide.x *= decay;
+      this.glide.z *= decay;
+      if (Math.hypot(this.glide.x, this.glide.z) < 1.5) this.glide = null;
+      this.clampFocus();
+    }
 
     if (followUnit) {
       // Over the shoulder of whatever is being driven.

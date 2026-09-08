@@ -53,8 +53,12 @@ export class TouchInput {
 
   down(e) {
     if (!this.enabled || e.pointerType !== 'touch') return false;
-    const p = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
+    const p = {
+      id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+      t: performance.now(), moved: false, vx: 0, vy: 0, lastT: performance.now(),
+    };
     this.pointers.set(e.pointerId, p);
+    this.rig.glide = null;
 
     if (this.direct.active) return this.directDown(e, p);
 
@@ -110,7 +114,14 @@ export class TouchInput {
 
     if (p.moved && this.pointers.size === 1) {
       this.clearLong();
+      if (this.boxing) { this.boxTo = { x: e.clientX, y: e.clientY }; return true; }
       this.rig.panScreen(dx, dy, innerHeight);
+      // Remember how fast the finger was going, for the flick.
+      const now = performance.now();
+      const gap = Math.max(1, now - p.lastT);
+      p.vx = dx / gap * 1000;
+      p.vy = dy / gap * 1000;
+      p.lastT = now;
     }
     return true;
   }
@@ -125,13 +136,52 @@ export class TouchInput {
 
     if (this.direct.active) return this.directUp(e, p);
 
+    if (this.boxing) {
+      this.finishBox(p);
+      return true;
+    }
     const quick = performance.now() - p.t < TAP_MS * 2.4;
-    if (!p.moved && !p.handled && quick) this.tap(p);
+    if (!p.moved && !p.handled && quick) { this.tap(p); return true; }
+    // A flick keeps the map moving, so you are not swiping twenty times to
+    // cross it.
+    if (p.moved && Math.hypot(p.vx, p.vy) > 240 && performance.now() - p.lastT < 90) {
+      this.rig.fling(p.vx, p.vy, innerHeight);
+    }
     return true;
   }
 
   clearLong() {
     if (this.longTimer) { clearTimeout(this.longTimer); this.longTimer = null; }
+  }
+
+  /** Arm a one-shot box select: the next drag draws a marquee. */
+  armBox() {
+    this.boxing = true;
+    this.boxFrom = null;
+    this.boxTo = null;
+  }
+
+  finishBox(p) {
+    const from = { x: p.x0, y: p.y0 }, to = { x: p.x, y: p.y };
+    this.boxing = false;
+    this.boxTo = null;
+    if (Math.hypot(to.x - from.x, to.y - from.y) < 18) {
+      this.tap(p);
+      return;
+    }
+    this.selection.boxSelect(from, to, false);
+    this.hud.say(`${this.selection.units.length} selected`);
+  }
+
+  /** The marquee rectangle to draw, while one is being dragged. */
+  boxRect() {
+    if (!this.boxing || !this.boxTo) return null;
+    const p = [...this.pointers.values()][0];
+    if (!p) return null;
+    return {
+      left: Math.min(p.x0, this.boxTo.x), top: Math.min(p.y0, this.boxTo.y),
+      width: Math.abs(this.boxTo.x - p.x0), height: Math.abs(this.boxTo.y - p.y0),
+    };
   }
 
   ndc(p) {

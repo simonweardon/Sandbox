@@ -36,6 +36,8 @@ So this is not a copy of the game. It is a working recreation of how the game
 | Objectives, manpower and reinforcement call-ins | `src/sim/capture.js` |
 | Destructible scenery that tanks flatten and shells knock down | `src/sim/maps.js` |
 | Occupying buildings and fighting from the windows | `src/sim/garrison.js` |
+| Ammunition that runs out, and crates and lorries that replace it | `src/sim/supply.js` |
+| Playable with a thumb as well as a mouse | `src/input/touch.js` |
 
 ## The bit that matters: armour
 
@@ -131,12 +133,16 @@ There is no right button and no keyboard, so the scheme is a different one:
 | Tap your own unit | Select it |
 | Long press it | Select the whole squad |
 | Tap anywhere else | Order the selection there — move, attack, get in, occupy, depending on what is under your finger |
-| Drag | Pan |
+| Drag | Pan. The ground moves with your finger, and a flick keeps it going |
+| Tap or drag the minimap | Jump the camera straight there |
 | Pinch, twist | Zoom, rotate |
-| Buttons along the bottom | Stance, hold fire, stop, get out, take over |
+| **All** | Select your whole force at once |
+| **Box** | Then drag a box round the units you want |
+| Rest of the bar | Stance, hold fire, stop, get out, take over |
 
 Taking a unit over swaps that bar for a thumb stick on the left, a drag-to-aim
-area, and a trigger — the same direct control, driven with two thumbs.
+area, and a trigger — the same direct control, driven with two thumbs. The
+panels stand down while you are driving, so nothing sits under your hands.
 
 **Commanding.** Left click or drag to select, double click for the whole squad,
 right click to move — or to attack whatever is under the cursor. Shift queues
@@ -155,9 +161,22 @@ still drops, and the armour still decides what happens when it arrives. The
 crosshair goes amber while the turret is still traversing and green when the
 gun is laid and loaded. That gap is the whole game.
 
-**Winning.** Five objectives run down the middle of the map. Holding them pays
-for reinforcements, which arrive at your own edge and have to make their way
-up. Take all five to win — a typical battle runs ten to twenty minutes, and
+**Money.** Manpower accrues every second, faster for each objective you hold,
+and taking an objective **for the first time** pays a bonus of 180 on top —
+which is most of a rifle squad. That first push into new ground is the one
+worth making. Spend it on infantry, towed guns, ammunition crates and armour
+from the panel in the corner.
+
+**Ammunition runs out**, so supply is something you buy. A crate dropped
+behind the line, or a lorry parked near it, refills pouches, grenades, rockets
+and shell racks — slowly, and only for men who have stopped moving.
+
+**You start with a real force**, on both maps: two rifle squads, a towed gun
+and a tank, deployed on open ground rather than inside a building.
+
+**Winning.** Five objectives run down the middle of the map. Take all five to
+win outright, break the enemy entirely, or hold more ground than them when the
+thirty-minute clock runs out. A typical battle runs ten to twenty minutes and
 ends with a card telling you what it cost both sides.
 
 ## How it is put together
@@ -179,12 +198,13 @@ src/
     pathfinding.js   A* with separate costs for men and for armour
     combat.js        acquisition, traverse, shell selection, ammunition
     orders.js        order queues, hull steering, terrain following
-    capture.js       objectives and the manpower economy
+    capture.js       objectives, the manpower economy and capture bonuses
+    supply.js        ammunition crates, lorries and resupply
     ai.js            a commander that buys against an order of battle
     battle.js        the fixed 30 Hz step that drives all of it
   render/        everything visual, and nothing tactical
     models/          the procedural model builders
-  input/         camera, selection, direct control
+  input/         camera, selection, direct control, touch
 test/run.js      34 tests, most of them against the historical record
 ```
 
@@ -236,7 +256,7 @@ where to go — reads the world that function builds.
 npm start            # serve on :3000
 npm test             # 47 tests of the simulation, no browser needed
 npm run test:browser # 37 more, driving the real interface with mouse and keys
-npm run test:mobile  # 17 more, driving it with a thumb on a phone screen
+npm run test:mobile  # 23 more, driving it with a thumb on a phone screen
 ```
 
 No build step and no install: the only dependency is three.js, vendored under
@@ -273,7 +293,7 @@ The last two only show up if you sit and watch a whole battle, which is why
 the suite now plays one to the end and then counts what is still on the GPU.
 
 `test/mobile.mjs` drives it with a thumb on a phone-sized touchscreen, and
-found two more that neither of the others could see: the stylesheet had no
+found two of these that neither of the others could see: the stylesheet had no
 `touch-action`, so the browser held every touch back to see whether it was a
 scroll and the canvas never received a `pointerdown` at all; and the
 reinforcement panel covered the middle third of a portrait screen, so taps

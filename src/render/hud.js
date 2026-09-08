@@ -27,6 +27,9 @@ export class Hud {
 
   build() {
     const r = this.root;
+    // A phone shows less of everything: fewer log lines, shorter labels.
+    // Decided before anything is built, because the panels read it.
+    this.compact = matchMedia('(max-width: 820px), (pointer: coarse)').matches;
 
     // ---- top bar -------------------------------------------------------
     this.top = el('div', 'hud-top');
@@ -68,6 +71,7 @@ export class Hud {
     this.mapWrap.appendChild(this.mapCanvas);
     this.mapCtx = this.mapCanvas.getContext('2d');
     r.appendChild(this.mapWrap);
+    this.bindMap();
 
     // ---- crosshair and direct-control readout --------------------------
     this.cross = el('div', 'hud-cross');
@@ -92,11 +96,13 @@ export class Hud {
     // Touch controls: the buttons a phone has no keyboard for.
     this.touchBar = el('div', 'hud-touch');
     this.touchBar.innerHTML = `
-      <button data-act="stance">Prone</button>
-      <button data-act="hold">Hold</button>
-      <button data-act="stop">Stop</button>
-      <button data-act="out">Get out</button>
-      <button data-act="direct" class="primary">Take over</button>`;
+      <button data-act="all" title="Select everything">All</button>
+      <button data-act="box" title="Drag a box to select">Box</button>
+      <button data-act="stance" title="Stand or lie down">Down</button>
+      <button data-act="hold" title="Hold fire">Hold</button>
+      <button data-act="stop" title="Cancel orders">Stop</button>
+      <button data-act="out" title="Leave the vehicle or building">Out</button>
+      <button data-act="direct" class="primary" title="Take direct control">Drive</button>`;
     r.appendChild(this.touchBar);
 
     this.pad = el('div', 'hud-pad');
@@ -219,6 +225,16 @@ export class Hud {
     this.help.style.display = this.help.style.display === 'none' ? '' : 'none';
   }
 
+  /** A capture bonus is the moment the economy rewards you; make it land. */
+  bonus(amount, flag) {
+    const n = el('div', 'hud-bonus', `+${amount} MANPOWER`);
+    const sub = el('div', 'bonus-sub', flag ? `${flag.name} taken` : '');
+    n.appendChild(sub);
+    this.root.appendChild(n);
+    requestAnimationFrame(() => n.classList.add('show'));
+    setTimeout(() => { n.classList.remove('show'); setTimeout(() => n.remove(), 700); }, 2400);
+  }
+
   say(text) {
     this.toast.textContent = text;
     this.toast.classList.add('show');
@@ -230,7 +246,7 @@ export class Hud {
     const b = this.battle;
     const list = b.callList(b.playerSide);
     this.callBox.innerHTML = '';
-    const head = el('div', 'calls-head', 'CALL IN REINFORCEMENTS');
+    const head = el('div', 'calls-head', this.compact ? 'REINFORCEMENTS' : 'CALL IN REINFORCEMENTS');
     // On a phone this panel would cover half the battlefield, so it folds away
     // behind its own heading and the map underneath stays tappable.
     head.addEventListener('click', () => this.callBox.classList.toggle('open'));
@@ -307,7 +323,8 @@ export class Hud {
       const line = log[this.logSeen++];
       const n = el('div', `line ${line.tone}`, line.text);
       this.logBox.appendChild(n);
-      while (this.logBox.children.length > 9) this.logBox.removeChild(this.logBox.firstChild);
+      const keep = this.compact ? 3 : 9;
+      while (this.logBox.children.length > keep) this.logBox.removeChild(this.logBox.firstChild);
       setTimeout(() => n.classList.add('fade'), 7000);
     }
   }
@@ -421,26 +438,42 @@ export class Hud {
   updateMap() {
     const ctx = this.mapCtx, b = this.battle, w = b.world;
     const S = 220, k = S / w.size;
+    // Your own end of the map is drawn at the bottom, so the minimap agrees
+    // with what you are looking at rather than being upside down relative to it.
+    const my = (z) => (this.mapFlipped ? S - z * k : z * k);
     ctx.clearRect(0, 0, S, S);
     ctx.fillStyle = '#20261d';
     ctx.fillRect(0, 0, S, S);
 
-    // Roads.
+    // Roads and streets.
     ctx.strokeStyle = 'rgba(150,143,120,0.45)';
     ctx.lineWidth = 2;
     for (const road of w.terrain.roads || []) {
       ctx.beginPath();
-      road.forEach((p, i) => (i ? ctx.lineTo(p.x * k, p.z * k) : ctx.moveTo(p.x * k, p.z * k)));
+      road.forEach((p, i) => (i ? ctx.lineTo(p.x * k, my(p.z)) : ctx.moveTo(p.x * k, my(p.z))));
       ctx.stroke();
     }
-    // Flags.
+    // Buildings, so a city reads as a city at a glance.
+    const houses = w.props.filter((p) => p.capacity > 0 && p.alive);
+    if (houses.length) {
+      ctx.fillStyle = 'rgba(150,150,140,0.28)';
+      for (const p of houses) {
+        const hw = (p.w || p.radius * 2) * k, hd = (p.d || p.radius * 2) * k;
+        ctx.fillRect(p.x * k - hw / 2, my(p.z) - hd / 2, Math.max(1, hw), Math.max(1, hd));
+      }
+    }
+    // Objectives.
     for (const f of w.flags) {
       const owner = FACTIONS[f.owner];
       ctx.fillStyle = owner ? owner.marker : '#9a9a92';
       ctx.globalAlpha = 0.22;
-      ctx.beginPath(); ctx.arc(f.x * k, f.z * k, f.radius * k, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(f.x * k, my(f.z), f.radius * k, 0, 7); ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(f.x * k, f.z * k, 3.2, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(f.x * k, my(f.z), 3.4, 0, 7); ctx.fill();
+      if (f.contestedBy) {
+        ctx.strokeStyle = '#f0e6a0'; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(f.x * k, my(f.z), 6, 0, 7); ctx.stroke();
+      }
     }
     // Units.
     for (const e of w.entities) {
@@ -449,22 +482,48 @@ export class Hud {
       const f = FACTIONS[e.faction];
       const own = e.faction === b.playerSide;
       ctx.fillStyle = e.destroyed || e.abandoned ? '#4a4a46' : (f ? f.marker : '#fff');
-      const size = e.kind === KIND.VEHICLE ? 3 : (e.kind === KIND.GUN ? 2.6 : 1.7);
-      ctx.fillRect(e.x * k - size / 2, e.z * k - size / 2, size, size);
+      const size = e.kind === KIND.VEHICLE ? 4 : (e.kind === KIND.GUN ? 3.4 : 2.4);
+      ctx.fillRect(e.x * k - size / 2, my(e.z) - size / 2, size, size);
       if (own && e.selected) {
         ctx.strokeStyle = '#bdf5bd';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(e.x * k - size, e.z * k - size, size * 2, size * 2);
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(e.x * k - size, my(e.z) - size, size * 2, size * 2);
       }
     }
     // Camera footprint.
     const rig = this.rig;
     if (rig) {
-      ctx.strokeStyle = 'rgba(230,235,220,0.6)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(230,235,220,0.7)';
+      ctx.lineWidth = 1.2;
       const d = rig.distance * k * 0.62;
-      ctx.strokeRect(rig.focus.x * k - d, rig.focus.z * k - d * 0.7, d * 2, d * 1.4);
+      ctx.strokeRect(rig.focus.x * k - d, my(rig.focus.z) - d * 0.7, d * 2, d * 1.4);
     }
+  }
+
+  /** Tapping or clicking the minimap sends the camera there. */
+  bindMap() {
+    // Which way round to draw it: put the player's own start line at the
+    // bottom, wherever that happens to be.
+    const home = this.battle.world.flags.find((f) => f.owner === this.battle.playerSide);
+    this.mapFlipped = !home || home.z < this.battle.world.size / 2;
+
+    const jump = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const r = this.mapCanvas.getBoundingClientRect();
+      const pt = ev.touches?.[0] ?? ev;
+      const u = (pt.clientX - r.left) / r.width;
+      const v = (pt.clientY - r.top) / r.height;
+      const size = this.battle.world.size;
+      const x = u * size;
+      const z = this.mapFlipped ? (1 - v) * size : v * size;
+      this.rig.jumpTo(x, z);
+    };
+    this.mapCanvas.addEventListener('pointerdown', jump);
+    // Dragging across the minimap scrubs the camera with it.
+    this.mapCanvas.addEventListener('pointermove', (ev) => {
+      if (ev.buttons || ev.pointerType === 'touch') jump(ev);
+    });
   }
 }
 

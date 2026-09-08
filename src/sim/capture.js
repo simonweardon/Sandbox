@@ -9,8 +9,10 @@ import { KIND } from './world.js';
 import { clamp } from '../core/util.js';
 
 export const CAPTURE_RATE = 0.11;       // fraction per second per man
-export const BASE_INCOME = 3.0;         // manpower per second with no flags
-export const FLAG_INCOME = 2.6;
+export const BASE_INCOME = 3.5;         // manpower per second with no flags
+export const FLAG_INCOME = 3.2;
+/** Paid once, the first time a side takes a given objective. */
+export const FIRST_CAPTURE_BONUS = 180;
 
 export function stepCapture(battle, dt) {
   const world = battle.world;
@@ -45,6 +47,18 @@ export function stepCapture(battle, dt) {
         f.owner = side;
         f.progress = 0.02;
         world.logLine(`${f.name} captured by ${battle.sideName(side)}`, 'flag');
+
+        // Taking ground you have never held before pays for itself — that
+        // first push is the one worth making.
+        f.bonusPaid = f.bonusPaid || {};
+        if (!f.bonusPaid[side]) {
+          f.bonusPaid[side] = true;
+          battle.sides[side].mp = Math.min(battle.sides[side].mpCap,
+            battle.sides[side].mp + FIRST_CAPTURE_BONUS);
+          battle.sides[side].bonuses = (battle.sides[side].bonuses || 0) + 1;
+          world.logLine(`+${FIRST_CAPTURE_BONUS} manpower for taking ${f.name}`, 'reinforce');
+          battle.onCaptureBonus?.(side, FIRST_CAPTURE_BONUS, f);
+        }
         battle.onFlagCaptured?.(f, previous, side);
       }
     }

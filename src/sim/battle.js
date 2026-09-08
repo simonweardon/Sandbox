@@ -13,6 +13,7 @@ import { stepProjectiles } from './ballistics.js';
 import { stepVision } from './vision.js';
 import { stepAttrition } from './damage.js';
 import { stepCapture, scoreLine } from './capture.js';
+import { stepSupply, makeCrate, CRATE } from './supply.js';
 import { Commander } from './ai.js';
 import { makeSquad, makeVehicle, makeGun, makeSoldier, boardVehicle } from './units.js';
 import { SQUADS } from '../data/infantry.js';
@@ -86,6 +87,7 @@ export class Battle {
     return {
       infantry: calls.infantry.map(entry).filter(Boolean),
       support: calls.support.map(entry).filter(Boolean),
+      supply: [{ key: 'crate', name: CRATE.name, cost: CRATE.cost, cls: 'crate' }],
       vehicles: calls.vehicles.map(entry).filter(Boolean),
     };
   }
@@ -93,6 +95,12 @@ export class Battle {
   /** Spend manpower on a squad, gun or vehicle. Returns what arrived. */
   purchase(side, key, x, z) {
     const purse = this.sides[side];
+    if (key === 'crate') {
+      if (purse.mp < CRATE.cost) return null;
+      purse.mp -= CRATE.cost;
+      this.world.logLine(`${this.sideName(side)}: ammunition dropped`, 'reinforce');
+      return makeCrate(this.world, side, x, z);
+    }
     const def = SQUADS[key] || VEHICLES[key] || GUNS[key];
     if (!def || purse.mp < def.cost) return null;
     purse.mp -= def.cost;
@@ -121,33 +129,54 @@ export class Battle {
     return g;
   }
 
+  /**
+   * Open ground near a point: a starting force that spawns inside an apartment
+   * block on the city map is no use to anybody.
+   */
+  openGroundNear(x, z, tank = false) {
+    const T = this.world.terrain;
+    if (T.inBounds(x, z) && this.nav.passable(x, z, tank)) return { x, z };
+    for (let r = 6; r <= 90; r += 6) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + r;
+        const nx = x + Math.cos(a) * r, nz = z + Math.sin(a) * r;
+        if (T.inBounds(nx, nz) && this.nav.passable(nx, nz, tank)) return { x: nx, z: nz };
+      }
+    }
+    return { x, z };
+  }
+
   deployStarting(opts) {
     const S = this.size, w = this.world;
     const p = this.playerSide, e = this.enemySide;
     const pCalls = FACTIONS[p].calls, eCalls = FACTIONS[e].calls;
 
     const place = (side, key, x, z) => {
+      const tank = !!VEHICLES[key];
+      const at = this.openGroundNear(x, z, tank);
       const saved = this.sides[side].mp;
       this.sides[side].mp = 1e9;
-      const r = this.purchase(side, key, x, z);
+      const r = this.purchase(side, key, at.x, at.z);
       this.sides[side].mp = saved;
       return r;
     };
 
-    // The player opens with two rifle squads, an AT gun and a medium tank.
-    place(p, pCalls.infantry[0], S * 0.42, S * 0.12);
-    place(p, pCalls.infantry[0], S * 0.58, S * 0.12);
-    place(p, pCalls.support[0], S * 0.5, S * 0.09);
-    place(p, pCalls.vehicles[1] ?? pCalls.vehicles[0], S * 0.46, S * 0.08);
-
-    // The enemy opens with the same weight of force.
-    place(e, eCalls.infantry[0], S * 0.42, S * 0.88);
-    place(e, eCalls.infantry[0], S * 0.58, S * 0.88);
-    place(e, eCalls.support[0], S * 0.5, S * 0.91);
-    place(e, eCalls.vehicles[2] ?? eCalls.vehicles[0], S * 0.54, S * 0.92);
+    // Both sides open with the same weight: a rifle squad, a section of
+    // riflemen beside it, a gun and a tank. Enough to be doing something with
+    // from the first second rather than waiting on the first purchase.
+    const deploy = (side, calls, z, front) => {
+      place(side, calls.infantry[0], S * 0.42, z);
+      // A second squad, so there are always well over five rifles on the field.
+      place(side, calls.infantry[0], S * 0.58, z);
+      place(side, calls.support[0], S * 0.5, front);
+      place(side, calls.vehicles[1] ?? calls.vehicles[0], S * 0.46, front);
+    };
+    deploy(p, pCalls, S * 0.12, S * 0.08);
+    deploy(e, eCalls, S * 0.88, S * 0.92);
 
     w.log.length = 0;
     w.logLine('Battle begins. Take and hold the objectives.', 'flag');
+    w.logLine('Taking an objective for the first time pays a bonus.', 'info');
   }
 
   // ---- the loop ---------------------------------------------------------
@@ -178,6 +207,7 @@ export class Battle {
     const sub = dt / PROJECTILE_SUBSTEPS;
     for (let i = 0; i < PROJECTILE_SUBSTEPS && w.projectiles.length; i++) stepProjectiles(w, sub);
     stepAttrition(w, dt);
+    stepSupply(this, dt);
     stepCapture(this, dt);
     this.ai.step(dt);
     this.checkVictory();

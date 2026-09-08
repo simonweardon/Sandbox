@@ -39,6 +39,9 @@ const selection = new Selection(battle, rig, canvas);
 const direct = new DirectControl(battle, rig);
 const hud = new Hud(overlay, battle, selection, direct);
 hud.rig = rig;
+battle.onCaptureBonus = (side, amount, flag) => {
+  if (side === battle.playerSide) hud.bonus(amount, flag);
+};
 
 // On a touchscreen the mouse-and-keyboard scheme is replaced wholesale.
 const touch = new TouchInput(battle, rig, selection, direct, hud, canvas);
@@ -46,6 +49,14 @@ if (TouchInput.available()) {
   touch.enable();
   hud.touchOn = true;
   hud.bindTouch({
+    all: () => {
+      const n = selection.selectAll();
+      hud.say(n ? `${n} selected` : 'Nothing left');
+    },
+    box: () => {
+      touch.armBox();
+      hud.say('Drag a box around them');
+    },
     stance: () => {
       const men = selection.units.filter((u) => u.kind === KIND.SOLDIER);
       if (!men.length) return hud.say('Nothing selected');
@@ -80,7 +91,20 @@ if (TouchInput.available()) {
   });
 }
 
-rig.focus.set(battle.size * 0.5, 0, battle.size * 0.16);
+// Open looking at your own force, not at an empty corner of the map.
+{
+  const mine = battle.world.entities.filter((e) => e.faction === battle.playerSide
+    && !(e.kind === KIND.SOLDIER && e.inVehicle));
+  if (mine.length) {
+    rig.focus.set(
+      mine.reduce((a, e) => a + e.x, 0) / mine.length, 0,
+      mine.reduce((a, e) => a + e.z, 0) / mine.length + 14,
+    );
+  } else {
+    rig.focus.set(battle.size * 0.5, 0, battle.size * 0.16);
+  }
+  rig.targetDistance = rig.distance = TouchInput.available() ? 72 : 88;
+}
 
 // ---------------------------------------------------------------------------
 // Input
@@ -312,6 +336,16 @@ function frame(now) {
     touch.applyStick();
     if (direct.active) touch.stepTriggers();
     hud.touchStick = touch.stickState();
+    const box = touch.boxRect();
+    if (box) {
+      marquee.style.display = 'block';
+      marquee.style.left = `${box.left}px`;
+      marquee.style.top = `${box.top}px`;
+      marquee.style.width = `${box.width}px`;
+      marquee.style.height = `${box.height}px`;
+    } else if (!mouse.dragging) {
+      marquee.style.display = 'none';
+    }
     // Driving needs the bottom of a phone screen for the stick and the
     // trigger, so the command panels get out of the way while you are in it.
     document.body.classList.toggle('driving', direct.active);
