@@ -174,11 +174,19 @@ function rock(p) {
 }
 
 function crater(p) {
+  // A shallow bowl with a lip of thrown earth around it, sunk into the ground.
   const r = p.radius ?? 2.5;
-  return merge([
-    cyl(r * 0.55, r, 0.4, 12, 0x4a4136, { y: -0.18 }),
-    cyl(r, r * 1.05, 0.14, 12, 0x5a5044, { y: -0.02 }),
-  ]);
+  const parts = [
+    cyl(r * 0.5, r * 0.86, 0.45, 12, 0x413a30, { y: -0.26 }),
+    cyl(r * 0.92, r * 0.8, 0.16, 12, 0x554c3e, { y: -0.03 }),
+  ];
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2, j = hashNoise(i * 3.7 + (p.id || 0));
+    parts.push(sphere(r * (0.16 + j * 0.14), 5, shade(0x4b4336, (j - 0.5) * 0.3), {
+      x: Math.cos(a) * r * 0.92, y: 0.02, z: Math.sin(a) * r * 0.92, sy: 0.45,
+    }));
+  }
+  return merge(parts);
 }
 
 const BUILDERS = {

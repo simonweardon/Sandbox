@@ -14,6 +14,9 @@ import { CameraRig } from './input/camera.js';
 import { Selection } from './input/selection.js';
 import { DirectControl } from './input/directcontrol.js';
 import { DEG } from './core/util.js';
+import { VEHICLES, GUNS } from './data/vehicles.js';
+import { makeVehicle, makeGun, makeSquad } from './sim/units.js';
+import { Commander } from './sim/ai.js';
 
 const canvas = document.getElementById('view');
 const overlay = document.getElementById('hud');
@@ -271,13 +274,15 @@ setTimeout(() => { battle.paused = false; hud.refreshSpeed(); }, 50);
 requestAnimationFrame(frame);
 
 // Exposed for the smoke test and for poking at from the console.
+// Exposed for the visual smoke test under test/, and for poking at from the
+// browser console: lay out one of every vehicle, fast-forward a battle, or
+// take a unit under direct control without touching the interface.
 window.game = { battle, view, effects, rig, selection, direct, hud, scene, renderer, camera, THREE };
-
-// A little scaffolding for the visual smoke test in test/: it lets a headless
-// browser lay out one of every vehicle and photograph them.
-import { VEHICLES, GUNS } from './data/vehicles.js';
-import { makeVehicle, makeGun, makeSquad } from './sim/units.js';
-window.__data = { VEHICLES, GUNS };
-window.__mk = (world, faction, key, x, z, yaw) => makeVehicle(world, faction, key, x, z, yaw);
-window.__mkGun = (world, faction, key, x, z, yaw) => makeGun(world, faction, key, x, z, yaw);
-window.__mkSquad = (world, faction, key, x, z) => makeSquad(world, faction, key, x, z);
+window.game.spawn = {
+  vehicles: VEHICLES,
+  guns: GUNS,
+  vehicle: (faction, key, x, z, yaw = 0) => makeVehicle(battle.world, faction, key, x, z, yaw),
+  gun: (faction, key, x, z, yaw = 0) => makeGun(battle.world, faction, key, x, z, yaw),
+  squad: (faction, key, x, z) => makeSquad(battle.world, faction, key, x, z),
+  commander: (side) => new Commander(battle, side),
+};

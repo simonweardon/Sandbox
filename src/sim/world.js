@@ -361,9 +361,10 @@ export function fortifyFlags(world) {
         blocksLos: false, blocksMove: true, cover: 0.72, hp: 420, destructible: true,
       });
     }
+    const cx = f.x + (rng() - 0.5) * f.radius, cz = f.z + (rng() - 0.5) * f.radius;
     world.addProp({
-      type: 'crater', x: f.x + (rng() - 0.5) * f.radius, z: f.z + (rng() - 0.5) * f.radius,
-      y: 0, yaw: rng() * Math.PI, radius: 2.4 + rng() * 1.6, height: 0,
+      type: 'crater', x: cx, z: cz, y: world.terrain.heightAt(cx, cz),
+      yaw: rng() * Math.PI, radius: 1.5 + rng() * 1.1, height: 0,
       blocksLos: false, blocksMove: false, cover: 0.4, hp: 9999, destructible: false,
     });
   }
