@@ -4,7 +4,13 @@ A real-time tactics game in the mould of *Men of War: Assault Squad 2* — built
 from scratch, running in a browser, with no art files and no dependencies
 beyond three.js.
 
-Open `index.html`, or `npm start` and visit <http://localhost:3000>.
+**Play it: <https://game-production-9b29.up.railway.app>** — on a computer or a
+phone, nothing to install.
+
+To run it yourself: open `index.html`, or `npm start` and visit
+<http://localhost:3000>.
+
+Deployed from this branch on Railway; every push redeploys it.
 
 ## What this is, and what it isn't
 
