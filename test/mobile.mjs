@@ -161,8 +161,17 @@ check('but a hard pinch is not a leap', d1 < d0 * 2,
 
 // ---- getting around the map ------------------------------------------------
 {
-  // A drag should move the ground roughly with the finger, not creep.
-  await state(() => { window.game.battle.paused = true; window.game.rig.glide = null; });
+  // A drag should move the ground with the finger. Measured against what the
+  // geometry says it should be, not against a number of metres: the distance
+  // the camera happens to be at is whatever the tests before this left it at,
+  // and pinning an absolute figure only pins that history.
+  await state(() => {
+    const g = window.game;
+    g.battle.paused = true;
+    g.rig.glide = null;
+    g.rig.targetDistance = g.rig.distance = 90;   // a known, settled zoom
+  });
+  await page.waitForTimeout(120);
   const f0 = await state(() => ({ x: window.game.rig.focus.x, z: window.game.rig.focus.z, d: window.game.rig.distance }));
   await page.evaluate(() => {
     const c = document.getElementById('view');
@@ -173,8 +182,13 @@ check('but a hard pinch is not a leap', d1 < d0 * 2,
   });
   await page.waitForTimeout(200);
   const moved = await state((f) => Math.hypot(window.game.rig.focus.x - f.x, window.game.rig.focus.z - f.z), f0);
-  // 300 px of drag on a 727 px screen at this zoom should be tens of metres.
-  check('a drag moves the map a useful distance', moved > 25, `${moved.toFixed(0)} m for 300 px`);
+  const want = await state((f) => {
+    const rig = window.game.rig;
+    const perPx = (2 * f.d * Math.tan((48 / 2) * Math.PI / 180)) / window.innerHeight;
+    return 300 * (perPx / Math.max(0.35, Math.sin(rig.pitch)));
+  }, f0);
+  check('a drag carries the ground with the finger', moved > want * 0.75 && moved < want * 1.25,
+    `${moved.toFixed(0)} m for 300 px, against ${want.toFixed(0)} the geometry calls for`);
 
   // Tapping the minimap jumps the camera there.
   await state(() => { window.game.rig.glide = null; });
