@@ -37,6 +37,9 @@ So this is not a copy of the game. It is a working recreation of how the game
 | Destructible scenery that tanks flatten and shells knock down | `src/sim/maps.js` |
 | Occupying buildings and fighting from the windows | `src/sim/garrison.js` |
 | Ammunition that runs out, and crates and lorries that replace it | `src/sim/supply.js` |
+| Kit as a real thing: carried, weighed, swapped, and taken off the dead | `src/sim/inventory.js` |
+| Repairing a track, bandaging a man, burying a mine | `src/sim/fieldwork.js` |
+| A command card that shows every order rather than hiding it behind a key | `src/render/hud.js` |
 | Playable with a thumb as well as a mouse | `src/input/touch.js` |
 
 ## The bit that matters: armour
@@ -120,6 +123,33 @@ Press `U` to turn them out again. The enemy commander does the same thing —
 about two fifths of every formation it takes ground with stays behind to hold
 the buildings overlooking it, which is why taking a block off it is slow work.
 
+## The other bit that matters: what everyone is carrying
+
+A soldier's kit is not a line on a card. It is a set of things with a size,
+and he can only carry so many of them — a bazooka team spawns at about ninety
+per cent of what a man can hold, which is why they are slow and why they have
+nothing spare.
+
+The rule that makes it a game rather than a spreadsheet is that **magazines fit
+one weapon and rockets fit one launcher**. A rifleman standing over a dead
+machine gunner cannot take his belts. He can take the MG 42, and the belts come
+with it — and now he is carrying five slots of machine gun instead of three of
+rifle, and the man he took it from has a Kar 98k. That single restriction is
+most of what makes looting a decision.
+
+Press **X** and click a body to open both kits side by side; **B** sends the
+selected men to the nearest body to take whatever fits, without you having to
+sort it yourself.
+
+The kit that was already in the game but did nothing now does something:
+
+- an **engineer's repair kit** mends a blown track, a wrecked engine, a jammed
+  turret or shot-out optics — one fault per kit, and he has to stand at the
+  hull in the open for ten to twenty seconds to do it
+- a **medic's bandages** bring a wounded man back up and stop him bleeding
+- an **engineer's mines** go under the road, are invisible to the other side,
+  and take the track off the first vehicle that runs over them
+
 ## Playing it
 
 It runs on a phone as well as a computer. Press **F1** for the controls.
@@ -135,6 +165,7 @@ There is no right button and no keyboard, so the scheme is a different one:
 | Tap anywhere else | Order the selection there — move, attack, get in, occupy, depending on what is under your finger |
 | Drag | Pan. The ground moves with your finger, and a flick keeps it going |
 | Tap or drag the minimap | Jump the camera straight there |
+| The card above the bar | Every order, with the ones that need a target arming first |
 | Pinch, twist | Zoom, rotate. The zoom is damped — mapping finger separation straight onto camera distance made a normal pinch a leap |
 | **All** | Select your whole force at once |
 | **Box** | Then drag a box round the units you want |
@@ -144,12 +175,22 @@ Taking a unit over swaps that bar for a thumb stick on the left, a drag-to-aim
 area, and a trigger — the same direct control, driven with two thumbs. The
 panels stand down while you are driving, so nothing sits under your hands.
 
+**The command card.** Everything the selection can be told to do sits in a
+panel above the bottom-left corner, each with its key on it. A verb the
+selection cannot perform — Repair with no kit, Lay mine with no mines — is
+shown greyed rather than hidden, because "you cannot do that any more" is
+information and a missing button is not. Orders that need somewhere to point
+(a fire mission, a mine, first aid) arm themselves and wait for the click.
+
 **Commanding.** Left click or drag to select, double click for the whole squad,
 right click to move — or to attack whatever is under the cursor. Shift queues
 orders, Ctrl plus right click is an attack-move, and right-clicking one of your
 own vehicles puts the selected infantry aboard (hold Ctrl to crew it rather
-than ride in it). `1`/`2`/`3` set stance, `H` holds fire, `X` stops, `U`
-dismounts.
+than ride in it). `1`/`2`/`3` set stance, `H` holds fire, `Z` stops, `U`
+dismounts. `I` shows a man's kit, `X` opens it beside a body's, `B` sends men
+to search the dead, `R` repairs, `T` bandages, `M` lays a mine, `F` calls a
+fire mission onto a patch of ground. The cursor changes to say what a
+right-click will do before you make it.
 
 **Direct control.** Select a unit and press **Enter**. You are now the crew.
 `W`/`A`/`S`/`D` drive, the mouse lays the gun, left click fires the main
@@ -166,6 +207,12 @@ and taking an objective **for the first time** pays a bonus of 180 on top —
 which is most of a rifle squad. That first push into new ground is the one
 worth making. Spend it on infantry, towed guns, ammunition crates and armour
 from the panel in the corner.
+
+Manpower is not the only limit. **Each call-in is barred for a while after you
+use it** — about twenty seconds for a rifle squad, a minute or more for a heavy
+tank — with the wait swept across the button. Without that, the answer to every
+problem is four of the same tank at once, and the timing of a purchase stops
+being a decision.
 
 **Ammunition runs out**, so supply is something you buy. A crate dropped
 behind the line, or a lorry parked near it, refills pouches, grenades, rockets

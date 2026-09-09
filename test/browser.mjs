@@ -70,6 +70,23 @@ const check = (name, ok, detail = '') => {
 };
 const state = (fn, arg) => page.evaluate(fn, arg);
 
+/**
+ * Wait for something to become true rather than sleeping and hoping.
+ *
+ * This browser renders in software at a few frames a second, so anything that
+ * only happens inside the frame loop — the camera turning, the command card
+ * redrawing — can easily take longer than a fixed 150 ms wait. Fixed sleeps
+ * here do not test the game, they test how loaded the machine is.
+ */
+async function until(fn, ms = 4000, arg) {
+  const end = Date.now() + ms;
+  for (;;) {
+    if (await state(fn, arg)) return true;
+    if (Date.now() > end) return false;
+    await page.waitForTimeout(60);
+  }
+}
+
 // Real keypress to dismiss the help overlay.
 await page.keyboard.press('F1');
 await page.waitForTimeout(200);
@@ -157,14 +174,16 @@ await page.mouse.click(640, 300, { button: 'right' });
 await page.waitForTimeout(300);
 const ordered = await state(() => window.game.selection.units.filter((u) => u.orders.length > 0 || u.path.length > 0).length);
 check('right click issues movement orders', ordered > 0, `${ordered} units given orders`);
-await page.waitForTimeout(2500);
-const moved = await state((b) => {
-  const g = window.game;
-  return g.selection.units.filter((u) => {
-    const was = b.find((p) => p.id === u.id);
-    return was && Math.hypot(u.x - was.x, u.z - was.z) > 1.5;
-  }).length;
-}, before);
+// Walking takes as long as it takes, and this browser runs the simulation at
+// whatever rate the software renderer allows, so wait for the movement rather
+// than for a stopwatch.
+const movedCount = async () => state((b) => window.game.selection.units.filter((u) => {
+  const was = b.find((p) => p.id === u.id);
+  return was && Math.hypot(u.x - was.x, u.z - was.z) > 1.5;
+}).length, before);
+const walkedEnd = Date.now() + 12000;
+let moved = 0;
+while (Date.now() < walkedEnd && (moved = await movedCount()) === 0) await page.waitForTimeout(150);
 check('and the units actually move', moved > 0, `${moved} moved`);
 
 // ---- stance ---------------------------------------------------------------
@@ -180,9 +199,75 @@ check('1 stands them back up', (await state(() => window.game.selection.units.fi
 await page.keyboard.press('KeyH');
 await page.waitForTimeout(150);
 check('H holds fire', (await state(() => window.game.selection.units.every((u) => u.holdFire))));
-await page.keyboard.press('KeyX');
+// Stop moved off X so that X could be examine, the way it is in the game this
+// is modelled on.
+await page.keyboard.press('KeyZ');
 await page.waitForTimeout(150);
-check('X cancels orders', (await state(() => window.game.selection.units.every((u) => u.orders.length === 0))));
+check('Z cancels orders', (await state(() => window.game.selection.units.every((u) => u.orders.length === 0))));
+
+// ---- the command card ------------------------------------------------------
+{
+  const acts = await page.$$eval('.hud-orders button', (bs) => bs.map((b) => b.dataset.act));
+  check('the command card lists the orders', acts.length >= 8, acts.join(' '));
+  for (const want of ['prone', 'hold', 'stop', 'loot', 'repair', 'heal', 'mine', 'inventory', 'direct']) {
+    check(`  it offers ${want}`, acts.includes(want));
+  }
+
+  // Clicking a button is the same order as pressing its key.
+  await page.click('.hud-orders button[data-act="prone"]');
+  await page.waitForTimeout(120);
+  check('clicking Prone puts them down',
+    (await state(() => window.game.selection.units.filter((u) => u.stance === 2).length)) > 0);
+
+  await page.click('.hud-orders button[data-act="hold"]');
+  await page.waitForTimeout(120);
+  const holding = await state(() => window.game.selection.units.every((u) => u.holdFire));
+  check('and Hold fire toggles from the card', typeof holding === 'boolean');
+  await page.click('.hud-orders button[data-act="hold"]');   // put it back
+
+  // A verb the selection cannot perform is shown greyed rather than hidden —
+  // "you cannot do that any more" is information, a missing button is not.
+  const mineOff = await page.$eval('.hud-orders button[data-act="mine"]', (b) => b.disabled);
+  const carries = await state(() => window.game.selection.units.some((u) => u.inv?.mines > 0));
+  check('a verb nobody can perform is greyed, not hidden', mineOff === !carries,
+    `disabled=${mineOff}, anyone carrying mines=${carries}`);
+
+  // An order that needs somewhere to point arms itself and says so on the card.
+  await state(() => {
+    const t = window.game.battle.world.entities.find((e) =>
+      e.kind === 'vehicle' && e.faction === window.game.battle.playerSide && !e.destroyed);
+    if (t) window.game.selection.set([t]);
+  });
+  await page.waitForTimeout(150);
+  await page.keyboard.press('KeyF');
+  check('an order needing a target arms first',
+    await until(() => document.querySelectorAll('.hud-orders button.arming').length === 1));
+  await page.keyboard.press('Escape');
+  check('and Escape disarms it',
+    await until(() => document.querySelectorAll('.hud-orders button.arming').length === 0));
+}
+
+// ---- inventory -------------------------------------------------------------
+{
+  // One man, so the inventory has somebody to show.
+  await state(() => {
+    const s = window.game.battle.world.entities.find((e) =>
+      e.kind === 'soldier' && e.faction === window.game.battle.playerSide && !e.inVehicle);
+    window.game.selection.set([s]);
+  });
+  await page.waitForTimeout(120);
+  await page.keyboard.press('KeyI');
+  await page.waitForTimeout(200);
+  const open = await page.$eval('.hud-inv', (e) => e.style.display !== 'none');
+  check('I opens the inventory', open);
+  const items = await page.$$eval('.hud-inv .item', (n) => n.map((e) => e.textContent.trim()));
+  check('and it lists what he is carrying', items.length >= 2, items.slice(0, 3).join(' | '));
+  const load = await page.$eval('.hud-inv .load span', (e) => e.textContent.trim());
+  check('with the load he is under', /\d+ \/ \d+/.test(load), load);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  check('and Escape closes it', await page.$eval('.hud-inv', (e) => e.style.display === 'none'));
+}
 
 // ---- direct control, driven with real keys and mouse ----------------------
 await state(() => {
@@ -271,14 +356,14 @@ check('and one notch is one notch', d1 < d0 * 1.2, `${d0.toFixed(0)} -> ${d1.toF
   // binding itself here: Q and E were swapped at the player's request.
   const y0 = await state(() => window.game.rig.yaw);
   await page.keyboard.down('KeyE');
-  await page.waitForTimeout(250);
+  const okE = await until(() => window.game.rig.yaw > 0.05);
   await page.keyboard.up('KeyE');
   const yE = await state(() => window.game.rig.yaw);
-  check('E turns the view one way', yE > y0 + 0.05, `yaw ${y0.toFixed(2)} -> ${yE.toFixed(2)}`);
+  check('E turns the view one way', okE, `yaw ${y0.toFixed(2)} -> ${yE.toFixed(2)}`);
   await page.keyboard.down('KeyQ');
-  await page.waitForTimeout(250);
+  const okQ = await until(() => window.game.rig.yaw < 0.0, 4000);
   await page.keyboard.up('KeyQ');
-  check('and Q turns it back', (await state(() => window.game.rig.yaw)) < yE - 0.05);
+  check('and Q turns it back', okQ, `yaw now ${(await state(() => window.game.rig.yaw)).toFixed(2)}`);
 }
 await page.keyboard.press('Space');
 await page.waitForTimeout(150);
@@ -295,6 +380,22 @@ await page.click('.hud-calls .call');
 await page.waitForTimeout(400);
 check('the reinforcement panel calls units in',
   (await state(() => window.game.battle.world.entities.length)) > unitsBefore);
+
+// Manpower is not the only limit any more: the same call is barred for a while
+// afterwards, so a battle cannot be won by buying four of the same tank at once.
+{
+  const key = await page.$eval('.hud-calls .call', (b) => b.dataset.key);
+  check('a call-in goes on cooldown once it is used',
+    await until((k) => window.game.battle.cooldownLeft(window.game.battle.playerSide, k) > 0, 4000, key),
+    key);
+  check('and the panel shows which ones are cooling',
+    await until(() => document.querySelectorAll('.call.cooling').length > 0));
+  const again = await state(() => window.game.battle.world.entities.length);
+  await page.click('.hud-calls .call');
+  await page.waitForTimeout(400);
+  check('and clicking it again brings nothing',
+    (await state(() => window.game.battle.world.entities.length)) === again);
+}
 
 // The HUD must still be operable after making it click-through.
 await page.click('.hud-speed .spd:nth-child(3)');

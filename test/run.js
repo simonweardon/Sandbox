@@ -24,6 +24,12 @@ import { Commander } from '../src/sim/ai.js';
 import { eyeHeight, signature } from '../src/sim/vision.js';
 import { DEG } from '../src/core/util.js';
 import * as THREE from '../vendor/three.module.js';
+import { itemsOf, loadOf, transfer, refuseTransfer, takeAll, CAPACITY } from '../src/sim/inventory.js';
+import {
+  canRepair, canHeal, canMine, damageOn, beginRepair, beginHeal, beginMine,
+  stepFieldwork, stepMines, layMine,
+} from '../src/sim/fieldwork.js';
+import { orderGroundFire, stepCombat } from '../src/sim/combat.js';
 import { CameraRig, wheelSteps, ZOOM_MIN, ZOOM_MAX } from '../src/input/camera.js';
 import { TouchInput } from '../src/input/touch.js';
 import { reseed } from '../src/core/rng.js';
@@ -338,6 +344,194 @@ test('pathfinding is fast enough to run on demand', () => {
   }
   const per = (Date.now() - t0) / 60;
   assert(per < 25, `paths took ${per.toFixed(1)} ms each, which is too slow`);
+});
+
+console.log('Buying reinforcements');
+test('a call-in goes on cooldown, so manpower is not the only limit', () => {
+  const b = new Battle({ seed: 21, size: 256, player: 'sov', enemy: 'ger' });
+  b.sides.sov.mp = 5000;
+  const first = b.purchase('sov', 'sov_rifle', 120, 20);
+  assert(first, 'the first squad arrives');
+  assert(b.cooldownLeft('sov', 'sov_rifle') > 0, 'and the call goes on cooldown');
+  assert(!b.purchase('sov', 'sov_rifle', 120, 20), 'a second one is refused straight away');
+
+  // Something else is still available: the cooldown is per call, not a lockout.
+  assert(b.purchase('sov', 'sov_at', 120, 20), 'a different call still works');
+
+  b.time += b.cooldownFor('sov_rifle') + 1;
+  assert(b.cooldownLeft('sov', 'sov_rifle') === 0, 'and it comes back');
+  assert(b.purchase('sov', 'sov_rifle', 120, 20), 'so it can be called again');
+});
+test('a refused purchase costs nothing', () => {
+  const b = new Battle({ seed: 22, size: 256, player: 'sov', enemy: 'ger' });
+  b.sides.sov.mp = 5000;
+  b.purchase('sov', 'sov_rifle', 120, 20);
+  const before = b.sides.sov.mp;
+  b.purchase('sov', 'sov_rifle', 120, 20);
+  assert(b.sides.sov.mp === before, 'manpower must not be taken for a call that is refused');
+});
+test('the opening force is deployed, not bought', () => {
+  // It goes through the same code as a call-in, so it very nearly started its
+  // own cooldowns — which would have barred each side from ever calling in the
+  // squad it began the battle with, and dropped the second rifle squad on the
+  // spot, because the two are placed one after the other.
+  const b = new Battle({ seed: 23, size: 384, player: 'sov', enemy: 'ger' });
+  const start = b.sides.sov.mp;
+  assert(start > 0, 'a side opens with manpower in hand');
+  for (const key of Object.values(b.callList('sov')).flat().map((c) => c.key)) {
+    assert(b.cooldownLeft('sov', key) === 0, `${key} should not open on cooldown`);
+  }
+  const squads = new Set(b.world.entities.filter((e) => e.kind === 'soldier' && e.faction === 'sov' && e.squad)
+    .map((e) => e.squad));
+  assert(squads.size >= 2, `both opening squads should be on the field, saw ${squads.size}`);
+});
+test('the commander still fields an army with cooldowns in force', () => {
+  // The cooldown made the AI pick something it could not have, get refused,
+  // and buy nothing at all that cycle — which halved the size of every fight.
+  const b = new Battle({ seed: 4242 });
+  const steps = Math.round((8 * 60) / TICK);
+  for (let i = 0; i < steps && !b.over; i++) b.step(TICK);
+  const theirs = b.world.entities.filter((e) => e.faction === 'ger');
+  assert(theirs.length > 20, `the enemy fielded only ${theirs.length} men and machines`);
+});
+
+console.log('Inventory and looting');
+test('a soldier spawns carrying what his kit says', () => {
+  const w = new World(256, 5);
+  const s = makeSoldier(w, 'ger', 'engineer', 40, 40);
+  const items = itemsOf(s);
+  const keys = items.map((i) => i.key);
+  assert(keys.includes('weapon'), 'no weapon');
+  assert(keys.includes('mags'), 'no magazines');
+  assert(keys.includes('mines'), 'an engineer carries mines');
+  assert(keys.includes('repairKit'), 'an engineer carries a repair kit');
+  assertBetween(loadOf(s), 1, CAPACITY, 'a fresh kit fits');
+});
+test('magazines only fit the weapon they came from', () => {
+  const w = new World(256, 5);
+  const rifleman = makeSoldier(w, 'ger', 'rifleman', 40, 40);   // Kar 98k
+  const gunner = makeSoldier(w, 'ger', 'smg', 42, 40);          // MP 40
+  const why = refuseTransfer(rifleman, gunner, 'mags', 1);
+  assert(why && /do not fit/.test(why), `should refuse, said: ${why}`);
+
+  // Taking the rifle itself is the way round it — which is the whole point.
+  assert(transfer(rifleman, gunner, 'weapon'), 'should be able to take the rifle');
+  assert(gunner.inv.primary === 'kar98k', 'he should be holding the Kar 98k');
+  assert(rifleman.inv.primary === 'mp40', 'and the MP 40 went the other way');
+  // The magazines went with it: a man is never left holding a weapon he has
+  // no ammunition for, which is the state the rule exists to prevent.
+  assert(gunner.inv.mags > 0, 'he got the magazines with the rifle');
+  assert(refuseTransfer(rifleman, gunner, 'mags', 1) !== null,
+    'and the MP 40 magazines he handed over still do not fit it');
+});
+test('a man cannot carry more than he can carry', () => {
+  const w = new World(256, 5);
+  const a = makeSoldier(w, 'sov', 'rifleman', 40, 40);
+  const b = makeSoldier(w, 'sov', 'rifleman', 42, 40);
+  a.inv.grenades = 40;
+  let moved = 0;
+  while (transfer(a, b, 'grenades', 1)) moved++;
+  assert(moved > 0, 'he should take some');
+  assert(loadOf(b) <= CAPACITY, `overloaded: ${loadOf(b)} of ${CAPACITY}`);
+  assert(a.inv.grenades > 0, 'and leave the rest');
+});
+test('the dead can be robbed, and only of what fits', () => {
+  const w = new World(256, 5);
+  const s = makeSoldier(w, 'ger', 'rifleman', 40, 40);
+  s.inv.grenades = 0;
+  s.inv.mags = 1;
+  const body = { inv: { primary: 'kar98k', mags: 6, rounds: 5, grenades: 3, launcher: null, rockets: 0, bandages: 2, mines: 0, repairKit: false, binoculars: false } };
+  const got = takeAll(body, s);
+  assert(got.length > 0, 'he should come back with something');
+  assert(s.inv.mags > 1, 'magazines from a man with the same rifle');
+  assert(s.inv.grenades > 0, 'and grenades');
+  // Weapons are a decision, not something swept up.
+  assert(body.inv.primary === 'kar98k', 'the rifle stays on the body until asked for');
+});
+
+console.log('Repairs, first aid and mines');
+test('an engineer mends a blown track, and spends the kit doing it', () => {
+  const b = new Battle({ seed: 11, size: 256, player: 'sov', enemy: 'ger' });
+  const v = makeVehicle(b.world, 'sov', 't34_76', 100, 100);
+  v.immobile = true;
+  v.components.trackL.broken = true;
+  const eng = makeSoldier(b.world, 'sov', 'engineer', 103, 100);
+  assert(canRepair(eng), 'an engineer with a kit can repair');
+  assert(damageOn(v), 'the tank is damaged');
+  assert(beginRepair(eng, v) === 'tracks', 'he starts on the tracks');
+
+  for (let i = 0; i < 400 && eng.job; i++) stepFieldwork(b, eng, 0.1);
+  assert(!v.immobile, 'the track should be back on');
+  assert(!v.components.trackL.broken, 'and the component mended');
+  assert(!eng.inv.repairKit, 'the kit is used up');
+  assert(!canRepair(eng), 'so he cannot do it again without another');
+});
+test('a repair only counts while he is standing at the tank', () => {
+  const b = new Battle({ seed: 12, size: 256, player: 'sov', enemy: 'ger' });
+  const v = makeVehicle(b.world, 'sov', 't34_76', 100, 100);
+  v.immobile = true;
+  const eng = makeSoldier(b.world, 'sov', 'engineer', 180, 100);   // a long way off
+  beginRepair(eng, v);
+  for (let i = 0; i < 400 && eng.job; i++) stepFieldwork(b, eng, 0.1);
+  assert(v.immobile, 'he cannot mend it from eighty metres away');
+  assert(eng.inv.repairKit, 'and has not used the kit up doing nothing');
+});
+test('a medic patches a wounded man up', () => {
+  const b = new Battle({ seed: 13, size: 256, player: 'usa', enemy: 'ger' });
+  const hurt = makeSoldier(b.world, 'usa', 'rifleman', 100, 100);
+  hurt.hp = 30;
+  hurt.bleeding = 1;
+  const medic = makeSoldier(b.world, 'usa', 'medic', 101, 100);
+  const bandages = medic.inv.bandages;
+  assert(canHeal(medic), 'a medic with bandages can help');
+  assert(beginHeal(medic, hurt), 'he sets to work');
+  for (let i = 0; i < 200 && medic.job; i++) stepFieldwork(b, medic, 0.1);
+  assert(hurt.hp > 30, `he should be better off: ${hurt.hp}`);
+  assert(hurt.bleeding === 0, 'and no longer bleeding');
+  assert(medic.inv.bandages === bandages - 1, 'one bandage gone');
+});
+test('a mine takes the track off the tank that runs over it', () => {
+  const b = new Battle({ seed: 14, size: 256, player: 'sov', enemy: 'ger' });
+  const eng = makeSoldier(b.world, 'sov', 'engineer', 120, 120);
+  const mines = eng.inv.mines;
+  assert(canMine(eng), 'an engineer carries mines');
+  assert(beginMine(eng, 120, 120), 'and can lay one');
+  for (let i = 0; i < 100 && eng.job; i++) stepFieldwork(b, eng, 0.1);
+  assert(b.world.mines?.length === 1, 'the mine is in the ground');
+  assert(eng.inv.mines === mines - 1, 'and out of his pack');
+
+  // Ours does not go off under our own tanks.
+  const friend = makeVehicle(b.world, 'sov', 't34_76', 120, 120);
+  b.world.rebuildHash();          // battle.step does this before stepMines
+  stepMines(b, 0.1);
+  assert(!friend.immobile, 'a mine does not blow up its own side');
+  b.world.remove(friend);
+
+  const enemy = makeVehicle(b.world, 'ger', 'pz4h', 120, 120);
+  b.world.rebuildHash();
+  stepMines(b, 0.1);
+  assert(enemy.immobile, 'but it does stop theirs');
+  assert(!b.world.mines[0].live, 'and it is spent afterwards');
+});
+
+console.log('Attack ground');
+test('a tank told to shell a spot puts high explosive on it', () => {
+  const b = new Battle({ seed: 15, size: 256, player: 'sov', enemy: 'ger' });
+  const v = makeVehicle(b.world, 'sov', 't34_76', 100, 100);
+  v.yaw = 0;
+  const he = v.ammo.he;
+  assert(orderGroundFire(v, 100, 220, 3), 'a tank can take a fire mission');
+  for (let i = 0; i < 600 && v.groundTarget; i++) {
+    b.world.rebuildHash();
+    stepCombat(b, 0.05);
+  }
+  assert(v.ammo.he < he, `it should have fired HE: ${he} -> ${v.ammo.he}`);
+  assert(!v.groundTarget, 'and stopped when the rounds were spent');
+});
+test('a rifleman cannot be told to shell anything', () => {
+  const w = new World(256, 5);
+  const s = makeSoldier(w, 'ger', 'rifleman', 40, 40);
+  assert(!orderGroundFire(s, 60, 60, 3), 'no cannon, no fire mission');
 });
 
 console.log('The camera');

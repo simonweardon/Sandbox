@@ -9,14 +9,22 @@ import { STANCE, STANCE_SPEED, boardVehicle, disembark, canDrive, vehicleManned 
 import { findPath } from './pathfinding.js';
 import { breakProp } from './damage.js';
 import { enterBuilding, leaveBuilding, isGarrisonable } from './garrison.js';
+import {
+  stepFieldwork, beginRepair, beginHeal, beginMine, canRepair, canHeal, canMine, damageOn,
+  REPAIR_REACH, hullLen,
+} from './fieldwork.js';
+import { takeAll, itemsOf } from './inventory.js';
 import { clamp, angleDelta, turnTowards, dist, TAU, DEG } from '../core/util.js';
 import { propDistance, nearestOnProp } from './shapes.js';
 
 export const ORDER = {
   MOVE: 'move', ATTACK_MOVE: 'attackMove', ATTACK: 'attack', HOLD: 'hold',
   BOARD: 'board', DISEMBARK: 'disembark', CAPTURE: 'capture', LOOK: 'look', REPAIR: 'repair',
-  GARRISON: 'garrison',
+  GARRISON: 'garrison', HEAL: 'heal', MINE: 'mine', LOOT: 'loot',
 };
+
+/** Orders that send a man to a spot and then have him do something there. */
+const ERRANDS = [ORDER.REPAIR, ORDER.HEAL, ORDER.MINE, ORDER.LOOT];
 
 export function issueOrder(battle, unit, order, queue = false) {
   if (!queue) { unit.orders.length = 0; unit.path = []; unit.pathIndex = 0; }
@@ -55,6 +63,16 @@ export function beginOrder(battle, unit) {
     unit.path = p || [{ x: v.x, z: v.z }];
     unit.pathIndex = 0;
     unit.state = 'boarding';
+  } else if (ERRANDS.includes(o.type)) {
+    // Walk to the job, then do it. The target may be moving (a wounded man
+    // crawling away, a tank still reversing), so the path is refreshed below.
+    const t = o.targetId != null ? world.byId.get(o.targetId) : null;
+    const tx = t ? t.x : o.x, tz = t ? t.z : o.z;
+    if (tx === undefined) { finishOrder(battle, unit); return; }
+    unit.path = findPath(battle.nav, unit.x, unit.z, tx, tz, false) || [{ x: tx, z: tz }];
+    unit.pathIndex = 0;
+    unit.state = 'moving';
+    unit.job = null;
   } else if (o.type === ORDER.DISEMBARK) {
     if (unit.inVehicle) disembark(world, unit);
     finishOrder(battle, unit);
@@ -147,6 +165,27 @@ function stepSoldier(battle, s, dt) {
     }
   }
 
+  if (ERRANDS.includes(o.type)) {
+    const t = o.targetId != null ? world.byId.get(o.targetId) : null;
+    if (o.targetId != null && !t) { finishOrder(battle, s); return; }
+    const tx = t ? t.x : o.x, tz = t ? t.z : o.z;
+    const reach = o.type === ORDER.REPAIR
+      ? REPAIR_REACH + hullLen(t) * 0.5
+      : o.type === ORDER.MINE ? 2.2 : 2.8;
+    if (dist(s.x, s.z, tx, tz) <= reach) {
+      s.path = [];
+      if (!s.job && !startErrand(battle, s, o, t)) { finishOrder(battle, s); return; }
+      if (!stepFieldwork(battle, s, dt) && !s.job) finishOrder(battle, s);
+      return;
+    }
+    // Keep the path pointed at a target that has moved since we set off.
+    const end = s.path[s.path.length - 1];
+    if (!end || dist(end.x, end.z, tx, tz) > 5) {
+      s.path = findPath(battle.nav, s.x, s.z, tx, tz, false) || [{ x: tx, z: tz }];
+      s.pathIndex = 0;
+    }
+  }
+
   const wp = currentWaypoint(s);
   if (!wp) {
     if (o.type === ORDER.MOVE || o.type === ORDER.ATTACK_MOVE) finishOrder(battle, s);
@@ -159,9 +198,41 @@ function stepSoldier(battle, s, dt) {
     s.pathIndex++;
     if (s.pathIndex >= s.path.length) {
       if (o.type === ORDER.CAPTURE) { s.state = 'capturing'; s.path = []; }
-      else if (o.type !== ORDER.BOARD) finishOrder(battle, s);
+      else if (o.type !== ORDER.BOARD && !ERRANDS.includes(o.type)) finishOrder(battle, s);
     }
   }
+}
+
+/**
+ * He has arrived; set him to work. Returns false if the job has evaporated on
+ * the way over — the tank was repaired by somebody else, the wounded man died,
+ * the body has already been picked clean.
+ */
+function startErrand(battle, s, o, target) {
+  if (o.type === ORDER.REPAIR) {
+    if (!canRepair(s) || !damageOn(target)) return false;
+    return !!beginRepair(s, target);
+  }
+  if (o.type === ORDER.HEAL) {
+    if (!canHeal(s)) return false;
+    return beginHeal(s, target);
+  }
+  if (o.type === ORDER.MINE) {
+    if (!canMine(s)) return false;
+    return beginMine(s, o.x, o.z);
+  }
+  if (o.type === ORDER.LOOT) {
+    // Looting is instant once he is standing over the body: the time was the
+    // walk. What he can carry is decided by the inventory rules.
+    const body = o.body;
+    if (!body || !itemsOf(body).length) return false;
+    const got = takeAll(body, s);
+    battle.world.logLine(got.length
+      ? `${s.role} took ${got.length} item${got.length > 1 ? 's' : ''} from the dead`
+      : `${s.role} found nothing he could use`, 'flag');
+    return false;
+  }
+  return false;
 }
 
 /** Walk a soldier one step towards a point. Returns true on arrival. */

@@ -11,6 +11,8 @@ import { View } from './render/view.js';
 import { Effects } from './render/effects.js';
 import { Hud } from './render/hud.js';
 import { CameraRig, wheelSteps } from './input/camera.js';
+import { transfer, takeAll, itemsOf, nearestLoot } from './sim/inventory.js';
+import { canHeal, canMine, canRepair, needsHelp, damageOn } from './sim/fieldwork.js';
 import { Selection } from './input/selection.js';
 import { DirectControl } from './input/directcontrol.js';
 import { TouchInput } from './input/touch.js';
@@ -45,43 +47,89 @@ battle.onCaptureBonus = (side, amount, flag) => {
 
 // On a touchscreen the mouse-and-keyboard scheme is replaced wholesale.
 const touch = new TouchInput(battle, rig, selection, direct, hud, canvas);
+
+/**
+ * An order that needs somewhere to point: the card arms it, the next click on
+ * the field spends it. Held here so the cursor and the card agree about it.
+ */
+let pending = null;
+function arm(act, message) {
+  pending = act;
+  hud.arm(act);
+  hud.say(message);
+}
+function disarm() {
+  if (!pending) return;
+  pending = null;
+  hud.arm(null);
+}
+
+// Every verb in one place: the command card, the touch bar and the keyboard
+// all go through this, so a button and its hotkey can never drift apart.
+const actions = {
+  all: () => {
+    const n = selection.selectAll();
+    hud.say(n ? `${n} selected` : 'Nothing left');
+  },
+  box: () => { touch.armBox(); hud.say('Drag a box around them'); },
+  stand: () => { selection.setStance(STANCE.STAND); hud.say('Standing'); },
+  crouch: () => { selection.setStance(STANCE.CROUCH); hud.say('Crouched'); },
+  prone: () => { selection.setStance(STANCE.PRONE); hud.say('Down'); },
+  stance: () => {
+    const men = selection.units.filter((u) => u.kind === KIND.SOLDIER);
+    if (!men.length) return hud.say('Nothing selected');
+    const next = men[0].stance === STANCE.PRONE ? STANCE.STAND : STANCE.PRONE;
+    selection.setStance(next);
+    hud.say(next === STANCE.PRONE ? 'Down' : 'Up');
+  },
+  hold: () => hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'),
+  stop: () => { selection.stop(); disarm(); hud.say('Stop'); },
+  attackGround: () => arm('attackGround', 'Click the ground to shell'),
+  heal: () => arm('heal', 'Click the man to patch up'),
+  mine: () => arm('mine', 'Click where to bury it'),
+  examine: () => arm('examine', 'Click a body, a crate or one of your men'),
+  repair: () => {
+    const n = selection.repairNearest();
+    hud.say(n ? `${n} on their way to repair it` : 'Nothing to repair, or no kit');
+  },
+  loot: () => {
+    const n = selection.loot();
+    hud.say(n ? `${n} searching the dead` : 'No bodies within reach');
+  },
+  inventory: () => {
+    const u = selection.units[0];
+    if (!u || u.kind !== KIND.SOLDIER || selection.units.length !== 1) {
+      return hud.say('Select one man to see his kit');
+    }
+    if (hud.inventoryOpen) hud.hideInventory();
+    else hud.showInventory(u, nearestLoot(battle.world, u.x, u.z, 6));
+  },
+  transfer: (from, to, key) => transfer(from, to, key, 1),
+  takeAll: (from, to) => (from && to ? takeAll(from, to) : []),
+  out: () => {
+    let n = selection.dismount();
+    for (const u of selection.units) {
+      if (u.kind !== KIND.VEHICLE) continue;
+      for (const id of [...u.passengers, ...u.crew.map((c) => c.occupant)].filter(Boolean)) {
+        const s2 = battle.world.byId.get(id);
+        if (s2) { disembark(battle.world, s2); n++; }
+      }
+    }
+    hud.say(n ? `${n} dismounted` : 'Nobody aboard or inside');
+  },
+  direct: () => {
+    const u = selection.units[0];
+    if (u && direct.take(u)) hud.say(direct.message);
+    else hud.say(direct.message || 'Select a unit first');
+  },
+};
+hud.actions = actions;
+
 if (TouchInput.available()) {
   touch.enable();
   hud.touchOn = true;
   hud.bindTouch({
-    all: () => {
-      const n = selection.selectAll();
-      hud.say(n ? `${n} selected` : 'Nothing left');
-    },
-    box: () => {
-      touch.armBox();
-      hud.say('Drag a box around them');
-    },
-    stance: () => {
-      const men = selection.units.filter((u) => u.kind === KIND.SOLDIER);
-      if (!men.length) return hud.say('Nothing selected');
-      const next = men[0].stance === STANCE.PRONE ? STANCE.STAND : STANCE.PRONE;
-      selection.setStance(next);
-      hud.say(next === STANCE.PRONE ? 'Down' : 'Up');
-    },
-    hold: () => hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'),
-    stop: () => { selection.stop(); hud.say('Stop'); },
-    out: () => {
-      let n = selection.dismount();
-      for (const u of selection.units) {
-        if (u.kind !== KIND.VEHICLE) continue;
-        for (const id of [...u.passengers, ...u.crew.map((c) => c.occupant)].filter(Boolean)) {
-          const s2 = battle.world.byId.get(id);
-          if (s2) { disembark(battle.world, s2); n++; }
-        }
-      }
-      hud.say(n ? `${n} dismounted` : 'Nobody aboard or inside');
-    },
-    direct: () => {
-      const u = selection.units[0];
-      if (u && direct.take(u)) hud.say(direct.message);
-      else hud.say(direct.message || 'Select a unit first');
-    },
+    ...actions,
     fireOn: () => touch.pullTrigger(true),
     fireOff: () => touch.pullTrigger(false),
     mgOn: () => touch.pullTrigger(true, true),
@@ -149,10 +197,31 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 
+/** Keep the cursor telling the truth about what the next click will do. */
+let cursorNow = '';
+function updateCursor() {
+  let want = 'move';
+  if (direct.active) want = '';
+  else if (pending) want = 'arming';
+  else if (selection.units.length) {
+    const hit = selection.pick(mouse.ndcX, mouse.ndcY);
+    want = selection.intentAt(rig.groundPoint(mouse.ndcX, mouse.ndcY), hit);
+  } else {
+    want = '';
+  }
+  if (want === cursorNow) return;
+  if (cursorNow) canvas.classList.remove(`cur-${cursorNow}`);
+  cursorNow = want;
+  if (want) canvas.classList.add(`cur-${want}`);
+}
+
 addEventListener('pointermove', (e) => {
   const prevX = mouse.x, prevY = mouse.y;
   ndc(e);
   if (touch.move(e)) return;
+  // Only when the mouse is idle: a ground raycast per mousemove while dragging
+  // a marquee is wasted work.
+  if (!mouse.down) updateCursor();
   if (direct.active) { direct.setAimFromScreen(mouse.ndcX, mouse.ndcY); return; }
   if (mouse.down && mouse.button === 1) {
     rig.rotate(-(e.clientX - prevX) * 0.006, (e.clientY - prevY) * 0.004);
@@ -191,7 +260,8 @@ addEventListener('pointerup', (e) => {
       lastClick = { t: now, x: e.clientX, y: e.clientY };
 
       const hit = selection.pick(mouse.ndcX, mouse.ndcY);
-      if (hit && hit.faction === battle.playerSide) {
+      if (pending && spendPending(hit)) { /* the click was the order */ }
+      else if (hit && hit.faction === battle.playerSide) {
         if (isDouble) selection.selectSquad(hit);
         else if (e.shiftKey) selection.add([hit]);
         else selection.set([hit]);
@@ -210,6 +280,48 @@ canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   rig.zoom(wheelSteps(e));
 }, { passive: false });
+
+/**
+ * The second half of an armed order: where, or on whom. Returns true when the
+ * click was spent, so it does not also change the selection.
+ */
+function spendPending(hit) {
+  const act = pending;
+  const point = rig.groundPoint(mouse.ndcX, mouse.ndcY);
+  disarm();
+  if (act === 'attackGround') {
+    const n = selection.attackGround(point);
+    hud.say(n ? `${n} firing on that ground` : 'Nothing selected can shell it');
+    return true;
+  }
+  if (act === 'mine') {
+    hud.say(selection.layMine(point) ? 'Laying a mine' : 'Nobody selected is carrying one');
+    return true;
+  }
+  if (act === 'heal') {
+    if (!hit || hit.faction !== battle.playerSide || hit.kind !== KIND.SOLDIER) {
+      hud.say('Click one of your own men');
+      return true;
+    }
+    if (!needsHelp(hit)) { hud.say('He is not hurt'); return true; }
+    const label = selection.order(point, hit, {});
+    hud.say(label === 'first aid' ? 'Bringing a bandage' : 'Nobody selected has one');
+    return true;
+  }
+  if (act === 'examine') {
+    // Whatever is under the cursor that has an inventory: a body, a crate, or
+    // one of your own men. The left pane is always the man you have selected.
+    const me = selection.units.find((u) => u.kind === KIND.SOLDIER && !u.inVehicle);
+    if (!me) { hud.say('Select a man first'); return true; }
+    const body = nearestLoot(battle.world, point.x, point.z, 6);
+    const other = hit && hit.kind === KIND.SOLDIER && hit !== me && hit.faction === battle.playerSide ? hit : null;
+    const right = other || body;
+    if (!right) { hud.say('Nothing there to search'); return true; }
+    hud.showInventory(me, right);
+    return true;
+  }
+  return false;
+}
 
 function issueOrderAt(e) {
   const point = rig.groundPoint(mouse.ndcX, mouse.ndcY);
@@ -231,6 +343,10 @@ function issueOrderAt(e) {
 }
 
 addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && !direct.active) {
+    if (hud.inventoryOpen) { hud.hideInventory(); return; }
+    if (pending) { disarm(); hud.say('Cancelled'); return; }
+  }
   if (e.repeat) return;
   keys.add(e.code);
   direct.keys.add(e.code);
@@ -278,8 +394,19 @@ addEventListener('keydown', (e) => {
       else if (selection.recallGroup(n)) hud.say(`Group ${n}`);
       break;
     }
-    case 'KeyH': hud.say(selection.toggleHoldFire() ? 'Holding fire' : 'Free to engage'); break;
-    case 'KeyX': selection.stop(); hud.say('Stop'); break;
+    case 'KeyH': actions.hold(); break;
+    case 'KeyZ': actions.stop(); break;
+    // X is examine, the way it is in the game this is modelled on: it opens
+    // the two-pane inventory on whatever you click next.
+    case 'KeyX': actions.examine(); break;
+    case 'KeyI': actions.inventory(); break;
+    case 'KeyB': actions.loot(); break;
+    case 'KeyR': actions.repair(); break;
+    case 'KeyT': actions.heal(); break;
+    case 'KeyM': actions.mine(); break;
+    // Fire on a patch of ground. Not A: that slides the camera left, which is
+    // the exact mistake attack-move made before it moved to Ctrl+right-click.
+    case 'KeyF': actions.attackGround(); break;
     case 'KeyU': {
       // Everybody out: men at windows, then passengers, then the crew, so a
       // half-track empties its section without abandoning itself unless meant.

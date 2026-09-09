@@ -253,11 +253,73 @@ function throwGrenade(battle, s, target) {
 
 // ---- vehicles --------------------------------------------------------------
 
+/**
+ * Shelling a patch of ground.
+ *
+ * Not a target so much as a map reference: the gun lays on it, fires high
+ * explosive, and keeps at it for a set number of rounds. It is how you flush
+ * men out of a house you cannot see into, which without it is a wall you can
+ * do nothing about.
+ */
+export function orderGroundFire(unit, x, z, rounds = 4) {
+  const guns = unit.guns || [];
+  const cannon = guns.some((g) => WEAPONS[g.w].cls === 'cannon');
+  if (!cannon) return false;
+  unit.groundTarget = { x, z, rounds };
+  unit.target = null;
+  unit.holdFire = false;
+  return true;
+}
+
+/** One tick of that. Returns true while the unit is busy with it. */
+function stepGroundFire(battle, u, dt) {
+  const world = battle.world;
+  const gt = u.groundTarget;
+  if (!gt) return false;
+  const y = world.terrain.heightAt(gt.x, gt.z);
+  const aim = { kind: 'ground', x: gt.x, z: gt.z, y, alive: true,
+    aimPoint: { x: gt.x, y: y + 0.4, z: gt.z } };
+
+  const isVehicle = u.kind === KIND.VEHICLE;
+  if (isVehicle && (u.destroyed || u.abandoned || u.gunBroken)) { u.groundTarget = null; return false; }
+  if (!isVehicle && (u.destroyed || !u.manned)) { u.groundTarget = null; return false; }
+
+  const desired = angleDelta(u.yaw, bearingTo(u, aim));
+  if (isVehicle && !u.turretJammed && u.def.model.turret) {
+    const rate = (u.def.traverse || 10) * DEG;
+    u.turretYaw = turnTowards(u.turretYaw, desired, rate * dt);
+  } else if (!isVehicle) {
+    const arc = (u.def.arc ?? 30) * DEG;
+    u.turretYaw = clamp(desired, -arc, arc);
+  }
+
+  const range = dist(u.x, u.z, gt.x, gt.z);
+  for (const g of u.guns) {
+    const w = WEAPONS[g.w];
+    if (w.cls !== 'cannon' || range > w.range) continue;
+    if (Math.abs(angleDelta(u.yaw + u.turretYaw, bearingTo(u, aim))) > 6 * DEG) { g.aimProgress *= 0.9; continue; }
+    g.aimProgress = clamp(g.aimProgress + dt / w.aimTime, 0, 1);
+    if (g.cooldown > 0 || g.aimProgress < 0.7) continue;
+    const shell = (u.ammo.he || 0) > 0 ? 'he' : 'ap';
+    if ((u.ammo[shell] || 0) <= 0) { u.groundTarget = null; return false; }
+    if (isVehicle) fireVehicleGun(battle, u, g, aim, shell, range);
+    else fireTowedGun(battle, u, g, aim, shell, range);
+    if (--gt.rounds <= 0) {
+      u.groundTarget = null;
+      world.logLine('Fire mission complete', 'flag');
+    }
+    return true;
+  }
+  return true;
+}
+
 function stepVehicleCombat(battle, v, dt) {
   const world = battle.world;
   if (v.destroyed || v.abandoned) return;
   for (const g of v.guns) g.cooldown = Math.max(0, g.cooldown - dt);
   if (v.controlled) return;
+
+  if (v.groundTarget && stepGroundFire(battle, v, dt)) return;
 
   const canShoot = gunReady(v) && !v.gunBroken;
   if (v.holdFire) { v.target = null; }
@@ -372,6 +434,7 @@ function stepGunCombat(battle, g, dt) {
   const crew = world.near(g.x, g.z, 4, (e) => e.kind === KIND.SOLDIER && e.faction === g.faction && !e.inVehicle);
   g.crewOn = crew;
   g.manned = crew.length >= Math.max(2, Math.ceil(g.crewNeeded / 2));
+  if (g.groundTarget && stepGroundFire(battle, g, dt)) return;
   if (!g.manned || g.holdFire) { g.target = null; return; }
 
   g.acquireTimer = (g.acquireTimer || 0) - dt;
@@ -411,16 +474,31 @@ function stepGunCombat(battle, g, dt) {
   if ((g.ammo[shell] || 0) <= 0) shell = shell === 'ap' ? 'he' : 'ap';
   if ((g.ammo[shell] || 0) <= 0) { g.outOfAmmo = true; return; }
 
+  fireTowedGun(battle, g, gun, t, shell, range);
+}
+
+/**
+ * One round out of a towed gun. Shared with the fire-mission path, which
+ * hands it a patch of ground dressed up as a target.
+ */
+export function fireTowedGun(battle, g, gun, target, shell, range) {
+  const world = battle.world;
+  const w = WEAPONS[gun.w];
+  const indirect = !!w.indirect;
   const from = muzzlePoint(world, g, gun);
-  const aimAt = indirect
-    ? { x: t.x, y: world.terrain.heightAt(t.x, t.z), z: t.z }
-    : leadTarget(from, { x: t.x, z: t.z, y: targetHeight(world, t), velX: t.velX, velZ: t.velZ }, w.velocity);
+  const aimAt = target.aimPoint
+    || (indirect
+      ? { x: target.x, y: world.terrain.heightAt(target.x, target.z), z: target.z }
+      : leadTarget(from, {
+        x: target.x, z: target.z, y: targetHeight(world, target),
+        velX: target.velX, velZ: target.velZ,
+      }, w.velocity));
 
   fireWeapon(world, g, gun.w, from, aimAt, {
     aim: gun.aimProgress, high: indirect,
     shell: w.shell === SHELL.HE ? 'he' : shell,
   });
-  g.ammo[shell]--;
+  g.ammo[shell] = Math.max(0, (g.ammo[shell] || 0) - 1);
   gun.cooldown = w.reload;
   gun.aimProgress = 0.4;
   g.lastFired = world.time;

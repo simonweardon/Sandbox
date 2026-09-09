@@ -2,6 +2,9 @@
 // minimap, and the direct-control readout.
 
 import { KIND } from '../sim/world.js';
+import { itemsOf, loadOf, CAPACITY, refuseTransfer } from '../sim/inventory.js';
+import { ROLES } from '../data/infantry.js';
+import { canRepair, canHeal, canMine, damageOn, needsHelp } from '../sim/fieldwork.js';
 import { WEAPONS } from '../data/weapons.js';
 import { FACTIONS } from '../data/factions.js';
 import { visibleTo } from '../sim/vision.js';
@@ -58,6 +61,32 @@ export class Hud {
     // ---- selection panel -----------------------------------------------
     this.panel = el('div', 'hud-panel');
     r.appendChild(this.panel);
+
+    // ---- command card ---------------------------------------------------
+    // Every verb the selection has, spelled out and clickable. Hidden hotkeys
+    // are how a game like this ends up feeling like it has nothing in it.
+    this.orders = el('div', 'hud-orders');
+    this.orders.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn || btn.disabled) return;
+      const act = btn.dataset.act;
+      if (act && this.actions?.[act]) this.actions[act]();
+      this.orderSig = null;              // state has probably changed
+    });
+    r.appendChild(this.orders);
+
+    // ---- inventory ------------------------------------------------------
+    this.invBox = el('div', 'hud-inv');
+    this.invBox.style.display = 'none';
+    this.invBox.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-item]');
+      if (row) return this.moveItem(row.dataset.side, row.dataset.item);
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.dataset.inv === 'close') this.hideInventory();
+      else if (btn.dataset.inv === 'all') this.takeEverything();
+    });
+    r.appendChild(this.invBox);
 
     // ---- reinforcements ------------------------------------------------
     this.callBox = el('div', 'hud-calls');
@@ -257,7 +286,8 @@ export class Hud {
       row.appendChild(el('span', 'calls-label', group.toUpperCase()));
       for (const item of items) {
         const btn = el('button', 'call');
-        btn.innerHTML = `<span class="n">${item.name}</span><span class="c">${item.cost}</span>`;
+        btn.dataset.key = item.key;
+        btn.innerHTML = `<span class="n">${item.name}</span><span class="cd"></span><span class="c">${item.cost}</span>`;
         btn.title = `${item.name} — ${item.cost} manpower`;
         btn.onclick = () => this.callIn(item);
         row.appendChild(btn);
@@ -269,6 +299,8 @@ export class Hud {
 
   callIn(item) {
     const b = this.battle;
+    const wait = b.cooldownLeft(b.playerSide, item.key);
+    if (wait > 0) return this.say(`${item.name}: another in ${Math.ceil(wait)}s`);
     const spawn = b.spawnPointFor(b.playerSide);
     const got = b.purchase(b.playerSide, item.key, spawn.x, spawn.z);
     this.say(got ? `${item.name} called in` : 'Not enough manpower');
@@ -306,11 +338,20 @@ export class Hud {
     this.clock.title = 'Time remaining before the battle is decided on ground held';
 
     for (const { btn, item } of this.callButtons) {
+      const wait = b.cooldownLeft(b.playerSide, item.key);
       btn.classList.toggle('poor', purse.mp < item.cost);
+      btn.classList.toggle('cooling', wait > 0);
+      // The sweep across the button is the clock: how long until this one can
+      // be called again, without having to read a number.
+      btn.style.setProperty('--cool', wait > 0 ? `${(1 - wait / item.cooldown) * 100}%` : '100%');
+      const cd = btn.querySelector('.cd');
+      if (cd) cd.textContent = wait > 0 ? `${Math.ceil(wait)}s` : '';
     }
 
     this.updateLog();
     this.updatePanel();
+    this.updateOrders();
+    this.updateInventory();
     this.updateDirect();
     this.updateMap();
     if (this.touchOn) this.updatePad(this.touchStick);
@@ -327,6 +368,190 @@ export class Hud {
       while (this.logBox.children.length > keep) this.logBox.removeChild(this.logBox.firstChild);
       setTimeout(() => n.classList.add('fade'), 7000);
     }
+  }
+
+  // ---- the command card -------------------------------------------------
+
+  /**
+   * What this selection can be told to do, right now.
+   *
+   * Grey means the verb exists but not for these men — an engineer who has
+   * spent his repair kit still shows Repair, greyed, because "you cannot do
+   * that any more" is information and a missing button is not.
+   */
+  orderSpec() {
+    const sel = this.sel.units;
+    if (!sel.length) return [];
+    const men = sel.filter((u) => u.kind === KIND.SOLDIER);
+    const one = sel.length === 1 ? sel[0] : null;
+    const some = (fn) => men.some(fn);
+    const out = [];
+
+    if (men.length) {
+      const stance = men[0].stance;
+      out.push({ act: 'stand', label: 'Stand', key: '1', on: men.every((m) => m.stance === 0) && stance === 0 });
+      out.push({ act: 'crouch', label: 'Crouch', key: '2', on: men.every((m) => m.stance === 1) });
+      out.push({ act: 'prone', label: 'Prone', key: '3', on: men.every((m) => m.stance === 2) });
+    }
+    out.push({
+      act: 'hold', label: 'Hold fire', key: 'H',
+      on: sel.every((u) => u.holdFire),
+      title: 'Do not open fire until told — how an ambush is set',
+    });
+    out.push({ act: 'stop', label: 'Stop', key: 'Z', title: 'Cancel every order' });
+    out.push({
+      act: 'attackGround', label: 'Attack ground', key: 'F',
+      enabled: sel.some((u) => (u.guns || []).some((g) => WEAPONS[g.w]?.cls === 'cannon')),
+      title: 'Shell a patch of ground — then click where',
+    });
+
+    if (men.length) {
+      out.push({
+        act: 'loot', label: 'Search bodies', key: 'B',
+        title: 'Walk to the nearest body and take what fits',
+      });
+      out.push({
+        act: 'inventory', label: 'Inventory', key: 'I',
+        enabled: !!one && one.kind === KIND.SOLDIER,
+        title: one ? 'What he is carrying' : 'Select one man to see his kit',
+      });
+      out.push({
+        act: 'repair', label: 'Repair', key: 'R',
+        enabled: some(canRepair),
+        title: some((m) => m.inv.repairKit) ? 'Mend the nearest damaged vehicle'
+          : 'Nobody selected is carrying a repair kit',
+      });
+      out.push({
+        act: 'heal', label: 'First aid', key: 'T',
+        enabled: some(canHeal),
+        title: 'Patch up a wounded man — then click him',
+      });
+      out.push({
+        act: 'mine', label: 'Lay mine', key: 'M',
+        enabled: some(canMine),
+        title: 'Bury an anti-tank mine — then click where',
+      });
+    }
+    out.push({ act: 'out', label: 'Get out', key: 'U', title: 'Leave the vehicle or the building' });
+    out.push({
+      act: 'direct', label: 'Take over', key: 'Enter', primary: true,
+      enabled: sel.length === 1,
+      title: 'Drive and lay the gun yourself',
+    });
+    return out;
+  }
+
+  updateOrders() {
+    const spec = this.orderSpec();
+    // Rebuilding innerHTML sixty times a second would eat clicks halfway
+    // through, so only redraw when something actually changed.
+    const sig = spec.map((b) => `${b.act}${b.on ? '1' : ''}${b.enabled === false ? 'x' : ''}`).join(',')
+      + '|' + (this.pending || '');
+    if (sig === this.orderSig) return;
+    this.orderSig = sig;
+    this.orders.classList.toggle('on', spec.length > 0);
+    this.orders.innerHTML = spec.map((b) => `
+      <button data-act="${b.act}"${b.enabled === false ? ' disabled' : ''}
+        class="${b.on ? 'on' : ''}${b.primary ? ' primary' : ''}${this.pending === b.act ? ' arming' : ''}"
+        title="${(b.title || b.label).replace(/"/g, '&quot;')}">
+        <span class="lbl">${b.label}</span><span class="key">${b.key}</span>
+      </button>`).join('');
+  }
+
+  /** An order that needs a place or a target next: say so on the card. */
+  arm(act) {
+    this.pending = act;
+    this.orderSig = null;
+  }
+
+  // ---- the inventory screen ---------------------------------------------
+
+  /**
+   * Two panes: what this man has, and what is in front of him. Clicking an
+   * item moves it if the rules allow, and says why when they do not.
+   */
+  showInventory(left, right = null) {
+    this.invLeft = left;
+    this.invRight = right;
+    this.invSig = null;
+    this.invBox.style.display = '';
+    this.updateInventory();
+  }
+
+  hideInventory() {
+    this.invLeft = this.invRight = null;
+    this.invBox.style.display = 'none';
+  }
+
+  get inventoryOpen() { return !!this.invLeft; }
+
+  updateInventory() {
+    if (!this.invLeft) return;
+    // The man being looked at can die, or walk out of reach of the body.
+    if (this.invLeft.state === 'dead' || this.invLeft.hp <= 0) return this.hideInventory();
+    const sig = JSON.stringify([this.invLeft.inv, this.invRight?.inv, this.invNote]);
+    if (sig === this.invSig) return;
+    this.invSig = sig;
+
+    const pane = (carrier, side, title) => {
+      if (!carrier) {
+        return `<div class="pane empty"><div class="pane-t">Nothing to hand</div>
+          <div class="hint">Press X, then click a body, a crate or another man</div></div>`;
+      }
+      const items = itemsOf(carrier);
+      const load = loadOf(carrier);
+      const rows = items.length ? items.map((i) => `
+        <div class="item" data-side="${side}" data-item="${i.key}" title="${i.detail || ''}">
+          <span class="in">${i.name}</span>
+          <span class="ct">${i.count > 1 ? '&times;' + i.count : ''}</span>
+          <span class="sl">${i.slots}</span>
+        </div>`).join('') : '<div class="item none">Picked clean</div>';
+      return `<div class="pane">
+        <div class="pane-t">${title}</div>
+        <div class="load"><i style="width:${Math.min(100, (load / CAPACITY) * 100)}%"></i>
+          <span>${load} / ${CAPACITY}</span></div>
+        <div class="items">${rows}</div>
+      </div>`;
+    };
+
+    const l = this.invLeft, rr = this.invRight;
+    this.invBox.innerHTML = `
+      <div class="inv-head">
+        <span>Inventory</span>
+        <button data-inv="close" title="Close (Esc)">&times;</button>
+      </div>
+      <div class="panes">
+        ${pane(l, 'left', this.containerName(l))}
+        ${pane(rr, 'right', rr ? this.containerName(rr) : '')}
+      </div>
+      ${rr ? '<button class="take-all" data-inv="all">Take everything that fits</button>' : ''}
+      <div class="inv-note">${this.invNote || 'Click an item to move it across.'}</div>`;
+  }
+
+  /** What the right-hand pane is: a body on the ground, or another of your men. */
+  containerName(c) {
+    const role = ROLES[c.role]?.name || c.role || '';
+    if (c.kind === KIND.SOLDIER) return `${role} &mdash; carrying`;
+    if (role) return `${role} &mdash; dead`;
+    return 'On the ground';
+  }
+
+  /** Move one item between the panes, and explain a refusal rather than sulk. */
+  moveItem(side, key) {
+    const from = side === 'left' ? this.invLeft : this.invRight;
+    const to = side === 'left' ? this.invRight : this.invLeft;
+    if (!from || !to) { this.invNote = 'Nothing to move it to.'; this.invSig = null; return; }
+    const why = refuseTransfer(from, to, key, 1);
+    if (why) { this.invNote = `Cannot: ${why}.`; this.invSig = null; return; }
+    const done = this.actions?.transfer?.(from, to, key);
+    this.invNote = done ? `Took the ${done.name.toLowerCase()}.` : null;
+    this.invSig = null;
+  }
+
+  takeEverything() {
+    const got = this.actions?.takeAll?.(this.invRight, this.invLeft) || [];
+    this.invNote = got.length ? `Took ${got.length} item${got.length > 1 ? 's' : ''}.` : 'Nothing he could use.';
+    this.invSig = null;
   }
 
   updatePanel() {
@@ -543,9 +768,16 @@ simulated projectile; armour is resolved plate by plate; ammunition runs out.</p
 <tr><td>Right click a building</td><td>Occupy it and fire from the windows</td></tr>
 <tr><td>1 / 2 / 3</td><td>Stand / crouch / prone</td></tr>
 <tr><td>H</td><td>Hold fire</td></tr>
-<tr><td>X</td><td>Stop</td></tr>
+<tr><td>Z</td><td>Stop</td></tr>
 <tr><td>U</td><td>Get out of a vehicle or a building</td></tr>
 <tr><td>Ctrl + 1..9 / 1..9</td><td>Set and recall control groups</td></tr>
+<tr><td>I</td><td>What the selected man is carrying</td></tr>
+<tr><td>X</td><td>Examine &mdash; then click a body, a crate or one of your men, to move kit between them</td></tr>
+<tr><td>B</td><td>Search the nearest body for ammunition</td></tr>
+<tr><td>R</td><td>Repair the nearest damaged vehicle (needs a repair kit)</td></tr>
+<tr><td>T</td><td>First aid &mdash; then click the wounded man (needs a medic)</td></tr>
+<tr><td>M</td><td>Lay an anti-tank mine &mdash; then click where</td></tr>
+<tr><td>F</td><td>Shell a patch of ground &mdash; then click where</td></tr>
 <tr><th colspan="2">Camera</th></tr>
 <tr><td>W A S D / edge</td><td>Pan</td></tr>
 <tr><td>Q / E</td><td>Turn the view</td></tr>

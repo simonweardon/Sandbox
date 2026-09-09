@@ -3,6 +3,9 @@
 import * as THREE from '../../vendor/three.module.js';
 import { KIND } from '../sim/world.js';
 import { ORDER, issueOrder } from '../sim/orders.js';
+import { canRepair, canHeal, canMine, damageOn, needsHelp } from '../sim/fieldwork.js';
+import { orderGroundFire } from '../sim/combat.js';
+import { nearestLoot, itemsOf } from '../sim/inventory.js';
 import { visibleTo } from '../sim/vision.js';
 import { STANCE } from '../sim/units.js';
 import { dist } from '../core/util.js';
@@ -130,11 +133,31 @@ export class Selection {
       }
       label = 'attack';
     } else if (target && target.kind === KIND.VEHICLE && target.faction === this.side) {
-      for (const u of this.units) {
-        if (u.kind !== KIND.SOLDIER) continue;
-        issueOrder(b, u, { type: ORDER.BOARD, vehicleId: target.id, asCrew: !!opts.asCrew }, queue);
+      // A friendly tank with a track off, and somebody who can mend it: that
+      // is a repair job, not an order to climb aboard. Holding Ctrl still
+      // crews it, so the old behaviour is one modifier away.
+      const menders = opts.asCrew ? [] : this.units.filter((u) => canRepair(u));
+      if (menders.length && damageOn(target)) {
+        for (const u of menders) issueOrder(b, u, { type: ORDER.REPAIR, targetId: target.id }, queue);
+        for (const u of this.units) {
+          if (menders.includes(u) || u.kind !== KIND.SOLDIER) continue;
+          issueOrder(b, u, { type: ORDER.BOARD, vehicleId: target.id, asCrew: !!opts.asCrew }, queue);
+        }
+        label = 'repair';
+      } else {
+        for (const u of this.units) {
+          if (u.kind !== KIND.SOLDIER) continue;
+          issueOrder(b, u, { type: ORDER.BOARD, vehicleId: target.id, asCrew: !!opts.asCrew }, queue);
+        }
+        label = 'board';
       }
-      label = 'board';
+    } else if (target && target.kind === KIND.SOLDIER && target.faction === this.side
+               && needsHelp(target) && this.units.some((u) => canHeal(u))) {
+      for (const u of this.units) {
+        if (!canHeal(u) || u === target) continue;
+        issueOrder(b, u, { type: ORDER.HEAL, targetId: target.id }, queue);
+      }
+      label = 'first aid';
     } else {
       // A building under the cursor is an order to occupy it, not to walk into
       // the wall — which is the whole of city fighting.
@@ -174,6 +197,82 @@ export class Selection {
       out.push({ x: (c - (cols - 1) / 2) * gap, z: (r - (Math.ceil(n / cols) - 1) / 2) * gap });
     }
     return out;
+  }
+
+  /** Send whoever can dig one in to lay a mine on that spot. */
+  layMine(point, queue = false) {
+    const layers = this.units.filter((u) => canMine(u));
+    if (!layers.length) return null;
+    issueOrder(this.battle, layers[0], { type: ORDER.MINE, x: point.x, z: point.z }, queue);
+    return 'mine';
+  }
+
+  /** Search the nearest body. Somebody has to walk over to it. */
+  loot(queue = false) {
+    const world = this.battle.world;
+    let sent = 0;
+    for (const u of this.units) {
+      if (u.kind !== KIND.SOLDIER || u.inVehicle) continue;
+      const body = nearestLoot(world, u.x, u.z, 40);
+      if (!body) continue;
+      issueOrder(this.battle, u, { type: ORDER.LOOT, x: body.x, z: body.z, body }, queue);
+      sent++;
+    }
+    return sent;
+  }
+
+  /** Repair the nearest damaged friendly vehicle, without having to click it. */
+  repairNearest(queue = false) {
+    const world = this.battle.world;
+    let sent = 0;
+    for (const u of this.units) {
+      if (!canRepair(u)) continue;
+      let best = null, bestD = 60;
+      for (const v of world.entities) {
+        if (v.kind !== KIND.VEHICLE || v.faction !== this.side || !damageOn(v)) continue;
+        const d = dist(u.x, u.z, v.x, v.z);
+        if (d < bestD) { best = v; bestD = d; }
+      }
+      if (!best) continue;
+      issueOrder(this.battle, u, { type: ORDER.REPAIR, targetId: best.id }, queue);
+      sent++;
+    }
+    return sent;
+  }
+
+  /**
+   * Shell a patch of ground. Only things with a cannon can: a rifleman firing
+   * at bare earth is not a tactic, and a button that pretends otherwise is
+   * worse than no button.
+   */
+  attackGround(point) {
+    let n = 0;
+    for (const u of this.units) {
+      if (orderGroundFire(u, point.x, point.z, 4)) n++;
+    }
+    return n;
+  }
+
+/**
+   * What a right-click here would do, as a single word.
+   *
+   * The cursor is the game's only chance to say "this click will put your men
+   * in that building" before you make it. Without it every click is a guess,
+   * and a right-click that does something you did not expect costs a squad.
+   */
+  intentAt(point, target) {
+    if (!this.units.length) return 'none';
+    if (target && target.faction !== this.side) return 'attack';
+    if (target && target.kind === KIND.VEHICLE && target.faction === this.side) {
+      return this.units.some((u) => canRepair(u)) && damageOn(target) ? 'repair' : 'board';
+    }
+    if (target && target.kind === KIND.SOLDIER && target.faction === this.side
+        && needsHelp(target) && this.units.some((u) => canHeal(u))) return 'heal';
+    if (!point) return 'move';
+    if (this.units.some((u) => u.kind === KIND.SOLDIER)
+        && isGarrisonable(buildingAt(this.battle.world, point.x, point.z, 1.5))) return 'garrison';
+    if (this.battle.world.flags.some((f) => dist(f.x, f.z, point.x, point.z) < f.radius)) return 'capture';
+    return 'move';
   }
 
   setStance(stance) {

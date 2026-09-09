@@ -73,8 +73,12 @@ export class Commander {
       const def = SQUADS[key] || VEHICLES[key] || GUNS[key];
       return { key, cost: def?.cost ?? 9999, cls: VEHICLES[key]?.cls };
     });
-    // Two lorries is plenty; a third is not what the front line needs.
-    const eligible = all.filter((c) => !(c.cls === 'truck' && (owned.truck || 0) >= 2));
+    // Two lorries is plenty; a third is not what the front line needs. And a
+    // call-in that is still cooling is not an option at all — without this the
+    // commander picks it anyway, is refused, and buys nothing that cycle,
+    // which quietly halved the size of every battle when cooldowns went in.
+    const eligible = all.filter((c) => !(c.cls === 'truck' && (owned.truck || 0) >= 2)
+      && this.battle.cooldownLeft(this.side, c.key) <= 0);
     const priced = eligible.filter((c) => c.cost <= purse.mp).sort((a, b2) => b2.cost - a.cost);
     if (!priced.length) return;
 

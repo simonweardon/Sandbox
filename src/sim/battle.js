@@ -13,6 +13,7 @@ import { stepProjectiles } from './ballistics.js';
 import { stepVision } from './vision.js';
 import { stepAttrition } from './damage.js';
 import { stepCapture, scoreLine } from './capture.js';
+import { stepMines } from './fieldwork.js';
 import { stepSupply, makeCrate, CRATE } from './supply.js';
 import { Commander } from './ai.js';
 import { makeSquad, makeVehicle, makeGun, makeSoldier, boardVehicle } from './units.js';
@@ -77,12 +78,36 @@ export class Battle {
     return { x: S * 0.5 + (roll() - 0.5) * S * 0.3, z };
   }
 
+  /**
+   * How long a call-in is barred for after it is used.
+   *
+   * Without this, manpower is the only limit and the answer to every problem
+   * is to buy four of the same tank at once. A cooldown makes the *timing* of
+   * a purchase a decision, which is what stops a battle being an auction.
+   */
+  cooldownFor(key) {
+    if (key === 'crate') return 20;
+    if (VEHICLES[key]) return 25 + VEHICLES[key].cost * 0.22;
+    if (GUNS[key]) return 30;
+    return 14 + (SQUADS[key]?.cost ?? 100) * 0.06;
+  }
+
+  /** Seconds left before `key` can be called in again, 0 if it is ready. */
+  cooldownLeft(side, key) {
+    const until = this.sides[side]?.cooldowns?.[key] ?? 0;
+    return Math.max(0, until - this.time);
+  }
+
   /** What a side can call in, with prices, for the reinforcement panel. */
   callList(side) {
     const calls = FACTIONS[side].calls;
     const entry = (key) => {
       const d = SQUADS[key] || VEHICLES[key] || GUNS[key];
-      return d && { key, name: d.name, cost: d.cost, cls: SQUADS[key] ? 'squad' : (VEHICLES[key] ? VEHICLES[key].cls : d.cls) };
+      return d && {
+        key, name: d.name, cost: d.cost,
+        cls: SQUADS[key] ? 'squad' : (VEHICLES[key] ? VEHICLES[key].cls : d.cls),
+        cooldown: this.cooldownFor(key),
+      };
     };
     return {
       infantry: calls.infantry.map(entry).filter(Boolean),
@@ -92,18 +117,34 @@ export class Battle {
     };
   }
 
-  /** Spend manpower on a squad, gun or vehicle. Returns what arrived. */
-  purchase(side, key, x, z) {
+  /**
+   * Spend manpower on a squad, gun or vehicle. Returns what arrived.
+   *
+   * `opts.free` places a unit without charging for it or starting its
+   * cooldown: the opening force is a deployment, not a call-in, and putting it
+   * through the shop would leave every side barred from calling in the very
+   * thing it started with.
+   */
+  purchase(side, key, x, z, opts = {}) {
     const purse = this.sides[side];
+    const free = !!opts.free;
+    if (!free && this.cooldownLeft(side, key) > 0) return null;
+    const bill = () => {
+      if (free) return;
+      purse.cooldowns = purse.cooldowns || {};
+      purse.cooldowns[key] = this.time + this.cooldownFor(key);
+    };
     if (key === 'crate') {
-      if (purse.mp < CRATE.cost) return null;
-      purse.mp -= CRATE.cost;
+      if (!free && purse.mp < CRATE.cost) return null;
+      bill();
+      if (!free) purse.mp -= CRATE.cost;
       this.world.logLine(`${this.sideName(side)}: ammunition dropped`, 'reinforce');
       return makeCrate(this.world, side, x, z);
     }
     const def = SQUADS[key] || VEHICLES[key] || GUNS[key];
-    if (!def || purse.mp < def.cost) return null;
-    purse.mp -= def.cost;
+    if (!def || (!free && purse.mp < def.cost)) return null;
+    if (!free) purse.mp -= def.cost;
+    bill();
 
     if (SQUADS[key]) {
       const sq = makeSquad(this.world, side, key, x, z);
@@ -154,11 +195,7 @@ export class Battle {
     const place = (side, key, x, z) => {
       const tank = !!VEHICLES[key];
       const at = this.openGroundNear(x, z, tank);
-      const saved = this.sides[side].mp;
-      this.sides[side].mp = 1e9;
-      const r = this.purchase(side, key, at.x, at.z);
-      this.sides[side].mp = saved;
-      return r;
+      return this.purchase(side, key, at.x, at.z, { free: true });
     };
 
     // Both sides open with the same weight: a rifle squad, a section of
@@ -208,6 +245,7 @@ export class Battle {
     for (let i = 0; i < PROJECTILE_SUBSTEPS && w.projectiles.length; i++) stepProjectiles(w, sub);
     stepAttrition(w, dt);
     stepSupply(this, dt);
+    stepMines(this, dt);
     stepCapture(this, dt);
     this.ai.step(dt);
     this.checkVictory();
