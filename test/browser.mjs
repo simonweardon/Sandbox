@@ -256,11 +256,30 @@ if (dismounted) {
   check('U dismounts the crew', left === 0, `${left} still aboard (was ${dismounted})`);
 }
 
-// ---- zoom, pause, minimap --------------------------------------------------
+// ---- zoom, rotate, pause, minimap ------------------------------------------
 const d0 = await state(() => window.game.rig.targetDistance);
 await page.mouse.wheel(0, 300);
 await page.waitForTimeout(200);
-check('the wheel zooms', (await state(() => window.game.rig.targetDistance)) > d0);
+const d1 = await state(() => window.game.rig.targetDistance);
+check('the wheel zooms', d1 > d0);
+// One notch, not a leap across the map. Taking only the sign of deltaY used to
+// make every event of a trackpad swipe a full step.
+check('and one notch is one notch', d1 < d0 * 1.2, `${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
+
+{
+  // The keys are bound in main.js, which no unit test can import, so check the
+  // binding itself here: Q and E were swapped at the player's request.
+  const y0 = await state(() => window.game.rig.yaw);
+  await page.keyboard.down('KeyE');
+  await page.waitForTimeout(250);
+  await page.keyboard.up('KeyE');
+  const yE = await state(() => window.game.rig.yaw);
+  check('E turns the view one way', yE > y0 + 0.05, `yaw ${y0.toFixed(2)} -> ${yE.toFixed(2)}`);
+  await page.keyboard.down('KeyQ');
+  await page.waitForTimeout(250);
+  await page.keyboard.up('KeyQ');
+  check('and Q turns it back', (await state(() => window.game.rig.yaw)) < yE - 0.05);
+}
 await page.keyboard.press('Space');
 await page.waitForTimeout(150);
 check('Space pauses', await state(() => window.game.battle.paused));

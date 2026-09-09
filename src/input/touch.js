@@ -19,6 +19,12 @@ import { clamp, DEG } from '../core/util.js';
 const TAP_MS = 260;
 const TAP_SLOP = 14;          // pixels of travel still counted as a tap
 const LONG_MS = 480;
+// A pinch used to map finger separation straight onto camera distance, so
+// closing a 120 px gap to 40 px tripled the range in one grab. Damp it: the
+// camera moves by the separation ratio raised to this power.
+const PINCH_GAIN = 0.5;
+// And ignore the first few percent, so twisting to rotate does not also zoom.
+const PINCH_DEAD = 0.07;
 
 export class TouchInput {
   constructor(battle, rig, selection, direct, hud, canvas) {
@@ -101,8 +107,12 @@ export class TouchInput {
       const [a, b] = [...this.pointers.values()];
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
-      if (this.pinch.dist > 1) {
-        this.rig.targetDistance = clamp(this.pinch.d0 * (this.pinch.dist / dist), 14, 340);
+      if (this.pinch.dist > 1 && dist > 1) {
+        // Work in log space so the dead zone costs a little sensitivity
+        // rather than putting a step in the middle of the gesture.
+        let l = Math.log(dist / this.pinch.dist);   // positive: fingers spreading
+        l = l > 0 ? Math.max(0, l - PINCH_DEAD) : Math.min(0, l + PINCH_DEAD);
+        this.rig.setZoom(this.pinch.d0 * Math.exp(-l * PINCH_GAIN));
       }
       // Twisting the fingers orbits the camera.
       let da = angle - this.pinch.angle;

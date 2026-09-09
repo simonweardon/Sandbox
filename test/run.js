@@ -24,7 +24,8 @@ import { Commander } from '../src/sim/ai.js';
 import { eyeHeight, signature } from '../src/sim/vision.js';
 import { DEG } from '../src/core/util.js';
 import * as THREE from '../vendor/three.module.js';
-import { CameraRig } from '../src/input/camera.js';
+import { CameraRig, wheelSteps, ZOOM_MIN, ZOOM_MAX } from '../src/input/camera.js';
+import { TouchInput } from '../src/input/touch.js';
 import { reseed } from '../src/core/rng.js';
 
 let passed = 0, failed = 0;
@@ -426,6 +427,124 @@ test('the minimap jump puts the camera where it was asked', () => {
   assertBetween(rig.focus.x, 399, 401, 'jump x');
   assertBetween(rig.focus.z, 119, 121, 'jump z');
   assert(!rig.glide, 'a jump should cancel any glide');
+});
+
+test('Q and E turn the view the way the player asked for', () => {
+  // The player found the conventional mapping inverted, so the keys were
+  // swapped. Pin down what they now do on screen — a test that only checks
+  // the yaw changed would pass with them back the wrong way round.
+  //
+  // Measured, not reasoned: winding the yaw up slides the whole scene to the
+  // right, which brings the ground off the left edge into view. That is E.
+  const t = new Terrain(512, 1);
+  t.height.fill(0);
+  const cam = new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000);
+  const rig = new CameraRig(cam, t);
+  const settle = () => {
+    rig.focus.set(256, 0, 256);
+    rig.update(0.016, null);
+    cam.updateMatrixWorld(true);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+  };
+
+  for (const yaw of [0, 1.2, -2.1]) {
+    rig.yaw = yaw;
+    rig.distance = rig.targetDistance = 60;
+    settle();
+
+    // A landmark straight ahead, in the middle of the screen.
+    const { fx, fz } = rig.basis();
+    const mark = new THREE.Vector3(256 + fx * 40, 0, 256 + fz * 40);
+    const middle = mark.clone().project(cam).x;
+    assert(Math.abs(middle) < 0.05, `at yaw ${yaw.toFixed(1)} the landmark is not centred`);
+
+    // Holding E a quarter of a second carries it right, off towards the edge.
+    rig.rotate(1.3 * 0.25, 0);
+    settle();
+    const afterE = mark.clone().project(cam).x;
+    assert(afterE > middle + 0.05, `at yaw ${yaw.toFixed(1)} E turned the wrong way`);
+
+    // Q takes it back the other way by the same amount.
+    rig.yaw = yaw;
+    settle();
+    rig.rotate(-1.3 * 0.25, 0);
+    settle();
+    const afterQ = mark.clone().project(cam).x;
+    assert(afterQ < middle - 0.05, `at yaw ${yaw.toFixed(1)} Q turned the wrong way`);
+    assert(Math.abs(afterQ + afterE) < 0.05, 'Q and E should be mirror images');
+  }
+});
+test('one wheel notch is one wheel notch, whatever reports it', () => {
+  // Three units, one meaning. A mouse notch in Chrome is 100 pixels, in
+  // Firefox 3 lines, and a page-mode wheel sends 1.
+  assertBetween(wheelSteps({ deltaY: 100, deltaMode: 0 }), 0.99, 1.01, 'pixel notch');
+  assertBetween(wheelSteps({ deltaY: 3, deltaMode: 1 }), 0.99, 1.01, 'line notch');
+  assertBetween(wheelSteps({ deltaY: 1, deltaMode: 2 }), 0.99, 1.01, 'page notch');
+  // Direction survives, and no single event may do more than a notch.
+  assert(wheelSteps({ deltaY: -100, deltaMode: 0 }) < 0, 'scrolling up should zoom the other way');
+  assertBetween(wheelSteps({ deltaY: 4000, deltaMode: 0 }), 0.99, 1.01, 'a huge delta is still one notch');
+});
+test('a trackpad swipe does not cross the whole zoom range', () => {
+  // This is the bug the player hit: the old handler took only the sign of
+  // deltaY, so each of the thirty tiny events a trackpad fires during one
+  // swipe counted as a full step and the view shot from the men to the sky.
+  const t = new Terrain(512, 1);
+  const rig = new CameraRig(new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000), t);
+  rig.targetDistance = 70;
+  for (let i = 0; i < 30; i++) rig.zoom(wheelSteps({ deltaY: 4, deltaMode: 0 }));
+  assertBetween(rig.targetDistance / 70, 1.02, 1.6,
+    'thirty trackpad events should be a nudge, not a journey');
+
+  // A deliberate mouse-wheel roll still gets somewhere in a hurry.
+  rig.targetDistance = 70;
+  for (let i = 0; i < 6; i++) rig.zoom(wheelSteps({ deltaY: 100, deltaMode: 0 }));
+  assertBetween(rig.targetDistance / 70, 1.5, 2.6, 'six notches should roughly double the range');
+});
+test('zoom stays inside its limits', () => {
+  const t = new Terrain(512, 1);
+  const rig = new CameraRig(new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000), t);
+  for (let i = 0; i < 200; i++) rig.zoom(1);
+  assertBetween(rig.targetDistance, ZOOM_MAX - 0.01, ZOOM_MAX + 0.01, 'zoomed all the way out');
+  for (let i = 0; i < 200; i++) rig.zoom(-1);
+  assertBetween(rig.targetDistance, ZOOM_MIN - 0.01, ZOOM_MIN + 0.01, 'zoomed all the way in');
+});
+test('a pinch moves the camera less than the fingers move', () => {
+  const t = new Terrain(512, 1);
+  const rig = new CameraRig(new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000), t);
+  rig.targetDistance = 80;
+  const touch = new TouchInput({}, rig, {}, { active: false }, {}, {});
+  touch.enabled = true;
+
+  const finger = (id, x, y) => ({ pointerType: 'touch', pointerId: id, clientX: x, clientY: y });
+  touch.down(finger(1, 400, 500));
+  touch.down(finger(2, 520, 500));   // 120 px apart
+  touch.move(finger(2, 440, 500));   // squeezed to 40: a third of the gap
+
+  // Undamped that was a 3x change in one grab. It should be well short of it,
+  // and still clearly zooming out.
+  const ratio = rig.targetDistance / 80;
+  assertBetween(ratio, 1.2, 2.0, 'a hard pinch should zoom out, but not by three times');
+  touch.clearLong();
+});
+test('twisting two fingers rotates without zooming', () => {
+  const t = new Terrain(512, 1);
+  const rig = new CameraRig(new THREE.PerspectiveCamera(48, 1.5, 0.6, 3000), t);
+  rig.targetDistance = 80;
+  const touch = new TouchInput({}, rig, {}, { active: false }, {}, {});
+  touch.enabled = true;
+  const finger = (id, x, y) => ({ pointerType: 'touch', pointerId: id, clientX: x, clientY: y });
+
+  // Two fingers 100 px apart, turned 30 degrees about their midpoint. The
+  // separation wobbles by a few pixels the way a real hand's would.
+  touch.down(finger(1, 450, 500));
+  touch.down(finger(2, 550, 500));
+  const a = 30 * DEG, r = 51;
+  touch.move(finger(1, 500 - Math.cos(a) * r, 500 - Math.sin(a) * r));
+  touch.move(finger(2, 500 + Math.cos(a) * r, 500 + Math.sin(a) * r));
+
+  assert(Math.abs(rig.yaw) > 0.4, 'a 30 degree twist should turn the camera');
+  assertBetween(rig.targetDistance, 79.99, 80.01, 'a twist should not zoom');
+  touch.clearLong();
 });
 
 console.log('A whole battle');

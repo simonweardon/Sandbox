@@ -10,7 +10,7 @@ import { createRenderer, createScene, createCamera, focusShadow } from './render
 import { View } from './render/view.js';
 import { Effects } from './render/effects.js';
 import { Hud } from './render/hud.js';
-import { CameraRig } from './input/camera.js';
+import { CameraRig, wheelSteps } from './input/camera.js';
 import { Selection } from './input/selection.js';
 import { DirectControl } from './input/directcontrol.js';
 import { TouchInput } from './input/touch.js';
@@ -208,7 +208,7 @@ addEventListener('pointerup', (e) => {
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  rig.zoom(Math.sign(e.deltaY));
+  rig.zoom(wheelSteps(e));
 }, { passive: false });
 
 function issueOrderAt(e) {
@@ -327,8 +327,11 @@ function frame(now) {
     if (keys.has('KeyD') || keys.has('ArrowRight')) r += 1;
     if (keys.has('KeyA') || keys.has('ArrowLeft')) r -= 1;
     if (f || r) rig.pan(f, r, dt);
-    if (keys.has('KeyQ')) rig.rotate(1.3 * dt, 0);
-    if (keys.has('KeyE')) rig.rotate(-1.3 * dt, 0);
+    // Swapped on the player's word: Q now swings the view right (the ground
+    // slides left under it) and E left. The conventional way round read as
+    // inverted to them, so this is deliberate — see the camera test.
+    if (keys.has('KeyQ')) rig.rotate(-1.3 * dt, 0);
+    if (keys.has('KeyE')) rig.rotate(1.3 * dt, 0);
   }
 
   const steps = battle.advance(dt);

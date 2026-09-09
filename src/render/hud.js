@@ -548,7 +548,8 @@ simulated projectile; armour is resolved plate by plate; ammunition runs out.</p
 <tr><td>Ctrl + 1..9 / 1..9</td><td>Set and recall control groups</td></tr>
 <tr><th colspan="2">Camera</th></tr>
 <tr><td>W A S D / edge</td><td>Pan</td></tr>
-<tr><td>Q E or middle drag</td><td>Rotate</td></tr>
+<tr><td>Q / E</td><td>Turn the view</td></tr>
+<tr><td>Middle drag</td><td>Rotate and tilt</td></tr>
 <tr><td>Wheel</td><td>Zoom</td></tr>
 <tr><td>Space</td><td>Pause</td></tr>
 <tr><th colspan="2">Direct control &mdash; press Enter with a unit selected</th></tr>

@@ -152,7 +152,12 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(300);
 const d1 = await state(() => window.game.rig.targetDistance);
-check('pinching zooms', Math.abs(d1 - d0) > 2, `${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
+// Fingers squeezed from 100 px apart to 28 — about as hard as a hand pinches.
+// Mapped straight through that was a 3.5x jump, which is what made the zoom
+// feel uncontrollable. It should zoom out clearly, and by well under double.
+check('pinching zooms out', d1 > d0 + 2, `${d0.toFixed(0)} -> ${d1.toFixed(0)}`);
+check('but a hard pinch is not a leap', d1 < d0 * 2,
+  `${(d1 / d0).toFixed(2)}x for a full squeeze`);
 
 // ---- getting around the map ------------------------------------------------
 {

@@ -3,6 +3,30 @@
 import * as THREE from '../../vendor/three.module.js';
 import { clamp, lerp, DEG, turnTowards } from '../core/util.js';
 
+// How close and how far the camera may sit from its focus. Near enough to read
+// a man's kit, far enough to frame the whole 512 m field.
+export const ZOOM_MIN = 16;
+export const ZOOM_MAX = 300;
+
+/** Metres-per-notch is multiplicative, so the step is a ratio, not a distance. */
+const ZOOM_STEP = 1.11;
+
+/**
+ * A wheel event measured in notches.
+ *
+ * Browsers report scrolling in three different units, and a trackpad fires a
+ * burst of tiny pixel deltas where a mouse fires one big one. Reading only the
+ * sign of deltaY — which is what this used to do — turned every one of those
+ * tiny deltas into a full zoom step, so a single trackpad swipe crossed the
+ * entire zoom range. Convert to notches, and cap what one event may do.
+ */
+export function wheelSteps(e) {
+  const perUnit = e.deltaMode === 1 ? 1 / 3      // lines: three to a notch
+    : e.deltaMode === 2 ? 1                      // pages: one to a notch
+      : 1 / 100;                                 // pixels: a notch is 100 of them
+  return clamp((e.deltaY || 0) * perUnit, -1, 1);
+}
+
 export class CameraRig {
   constructor(camera, terrain) {
     this.cam = camera;
@@ -85,8 +109,15 @@ export class CameraRig {
     this.focus.z = clamp(this.focus.z, -m, this.terrain.size + m);
   }
 
-  zoom(delta) {
-    this.targetDistance = clamp(this.targetDistance * Math.pow(1.16, delta), 14, 340);
+  /** `steps` is in wheel notches and may be fractional. */
+  zoom(steps) {
+    this.targetDistance = clamp(
+      this.targetDistance * Math.pow(ZOOM_STEP, steps), ZOOM_MIN, ZOOM_MAX);
+  }
+
+  /** Set the distance outright, as a pinch does. */
+  setZoom(distance) {
+    this.targetDistance = clamp(distance, ZOOM_MIN, ZOOM_MAX);
   }
 
   rotate(dYaw, dPitch) {

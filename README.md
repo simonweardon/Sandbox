@@ -135,7 +135,7 @@ There is no right button and no keyboard, so the scheme is a different one:
 | Tap anywhere else | Order the selection there — move, attack, get in, occupy, depending on what is under your finger |
 | Drag | Pan. The ground moves with your finger, and a flick keeps it going |
 | Tap or drag the minimap | Jump the camera straight there |
-| Pinch, twist | Zoom, rotate |
+| Pinch, twist | Zoom, rotate. The zoom is damped — mapping finger separation straight onto camera distance made a normal pinch a leap |
 | **All** | Select your whole force at once |
 | **Box** | Then drag a box round the units you want |
 | Rest of the bar | Stance, hold fire, stop, get out, take over |
@@ -296,6 +296,9 @@ seen, because none of it was in the simulation at all:
 - winning did nothing: the battle simply stopped and never said why
 - a material cloned for every wreck, body and shell crater and never released —
   734 of them by the fourteenth minute, against 16 now
+- a wheel handler that read only the *sign* of `deltaY`, so each of the thirty
+  tiny events a trackpad fires during one swipe counted as a full zoom step and
+  the view shot from the men to the sky
 
 The last two only show up if you sit and watch a whole battle, which is why
 the suite now plays one to the end and then counts what is still on the GPU.

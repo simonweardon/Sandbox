@@ -1,1 +1,4 @@
 test/browser-final-frame.png
+test/mobile-final-frame.png
+node_modules/
+package-lock.json
