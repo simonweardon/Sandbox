@@ -218,6 +218,12 @@ being a decision.
 behind the line, or a lorry parked near it, refills pouches, grenades, rockets
 and shell racks — slowly, and only for men who have stopped moving.
 
+**Objectives are taken by men on foot.** Armour parked on one denies it —
+nobody plants a flag under its guns — but it cannot take it, which is what
+stops a battle being won by driving a tank onto five objectives and leaving it
+there. And a gun is not owned but manned: walk two men up to an abandoned
+enemy Pak and after a few seconds it is your Pak, pointing the other way.
+
 **You start with a real force**, on both maps: two rifle squads, a towed gun
 and a tank, deployed on open ground rather than inside a building.
 

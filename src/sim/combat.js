@@ -430,7 +430,27 @@ function stepGunCombat(battle, g, dt) {
   if (g.destroyed || g.controlled) return;
   for (const gun of g.guns) gun.cooldown = Math.max(0, gun.cooldown - dt);
 
-  // A gun needs crew standing at it. Without them it is scenery.
+  // A gun is not owned, it is manned. Walk a section up to an abandoned Pak
+  // and it is your Pak — one of the moments this kind of game is remembered
+  // for, and it was impossible before: the crew check demanded the gun's own
+  // faction, so an enemy gun could only ever be scenery you shot at.
+  const atGun = world.near(g.x, g.z, 4, (e) => e.kind === KIND.SOLDIER && !e.inVehicle);
+  const mine = atGun.filter((e) => e.faction === g.faction);
+  if (!mine.length) {
+    const takers = {};
+    for (const e of atGun) takers[e.faction] = (takers[e.faction] || 0) + 1;
+    const [side, n] = Object.entries(takers).sort((a, b) => b[1] - a[1])[0] || [];
+    if (side && n >= 2) {
+      g.takeover = (g.takeover || 0) + dt;
+      if (g.takeover > 4) {
+        world.logLine(`${g.def.name} taken over`, 'flag');
+        g.faction = side;
+        g.takeover = 0;
+        g.target = null;
+      }
+    } else { g.takeover = 0; }
+  } else { g.takeover = 0; }
+
   const crew = world.near(g.x, g.z, 4, (e) => e.kind === KIND.SOLDIER && e.faction === g.faction && !e.inVehicle);
   g.crewOn = crew;
   g.manned = crew.length >= Math.max(2, Math.ceil(g.crewNeeded / 2));

@@ -21,6 +21,7 @@ import { fireWeapon, stepProjectiles, solveElevationDrag } from '../src/sim/ball
 import { applySpall, evaluateVehicle, explode, stepAttrition } from '../src/sim/damage.js';
 import { Battle, TICK } from '../src/sim/battle.js';
 import { Commander } from '../src/sim/ai.js';
+import { stepCapture } from '../src/sim/capture.js';
 import { eyeHeight, signature } from '../src/sim/vision.js';
 import { DEG } from '../src/core/util.js';
 import * as THREE from '../vendor/three.module.js';
@@ -760,12 +761,61 @@ test('both sides take and lose ground', () => {
   assert(b.world.log.some((l) => l.tone === 'flag'), 'an objective should have changed hands');
 });
 test('tanks are knocked out and infantry become casualties', () => {
+  // Only the enemy gets a commander in a normal battle — the other side is
+  // the player. Left like that this runs one army against a stationary one,
+  // it is over in three minutes by a walkover, and whether any tank got shot
+  // on the way is luck. Give the player side a commander too and it is a
+  // battle, which is what this is trying to measure.
   const b = new Battle({ seed: 4242 });
-  const steps = Math.round((10 * 60) / TICK);
-  for (let i = 0; i < steps && !b.over; i++) b.step(TICK);
-  assert(b.world.corpses.length > 5, 'there should be casualties');
+  const playerAi = new Commander(b, b.playerSide);
+  playerAi.adopt();
+  const steps = Math.round((12 * 60) / TICK);
+  for (let i = 0; i < steps && !b.over; i++) {
+    b.step(TICK);
+    playerAi.step(TICK);
+  }
+  assert(b.world.corpses.length > 5, `only ${b.world.corpses.length} casualties`);
   const wrecks = b.world.entities.filter((e) => e.kind === 'vehicle' && (e.destroyed || e.abandoned));
   assert(wrecks.length > 0, 'there should be wrecks');
+});
+test('an abandoned enemy gun can be walked up to and turned round', () => {
+  const b = new Battle({ seed: 32, size: 256, player: 'sov', enemy: 'ger' });
+  const g = makeGun(b.world, 'ger', Object.keys(GUNS)[0], 100, 100);
+  const step = () => { b.world.rebuildHash(); stepCombat(b, TICK); };
+
+  // One man is not a gun crew.
+  const scout = makeSoldier(b.world, 'sov', 'rifleman', 101, 100);
+  for (let i = 0; i < 10 / TICK; i++) step();
+  assert(g.faction === 'ger', 'one man cannot serve a gun');
+
+  // Two can.
+  makeSoldier(b.world, 'sov', 'rifleman', 100, 101);
+  for (let i = 0; i < 10 / TICK && g.faction !== 'sov'; i++) step();
+  assert(g.faction === 'sov', 'a section takes the gun over');
+  assert(scout, 'the men are still standing at it');
+});
+test('an objective is taken by men on foot, not by parking a tank on it', () => {
+  const b = new Battle({ seed: 31, size: 384, player: 'sov', enemy: 'ger' });
+  const f = b.world.flags[0];
+  f.owner = 'ger';
+  f.progress = 1;
+
+  // A tank alone sits on it for a full minute and takes nothing.
+  const v = makeVehicle(b.world, 'sov', 't34_76', f.x, f.z);
+  for (let i = 0; i < 60 / TICK; i++) { b.world.rebuildHash(); stepCapture(b, TICK); }
+  assert(f.owner === 'ger', 'armour alone should not plant a flag');
+
+  // It does stop the other side working, though.
+  const theirs = makeSoldier(b.world, 'ger', 'rifleman', f.x + 1, f.z);
+  b.world.rebuildHash();
+  stepCapture(b, TICK);
+  assert(f.contestedBy === 'both', 'enemy armour on the objective stops the work');
+
+  // Send a section of infantry and it changes hands.
+  b.world.remove(theirs);
+  for (let i = 0; i < 4; i++) makeSoldier(b.world, 'sov', 'rifleman', f.x + i - 2, f.z + 1);
+  for (let i = 0; i < 90 / TICK && f.owner !== 'sov'; i++) { b.world.rebuildHash(); stepCapture(b, TICK); }
+  assert(f.owner === 'sov', 'men on foot take ground');
 });
 test('the simulation runs far faster than real time', () => {
   const b = new Battle({ seed: 909 });

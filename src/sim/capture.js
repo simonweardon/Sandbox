@@ -22,11 +22,15 @@ export function stepCapture(battle, dt) {
       (e.kind === KIND.SOLDIER && !e.inVehicle && e.alive) ||
       (e.kind === KIND.VEHICLE && !e.destroyed && !e.abandoned));
 
+    // Only men on their feet take ground. Armour parked on an objective denies
+    // it — nobody plants a flag under its guns — but it cannot take it either,
+    // which is what stops a battle being won by driving a tank onto five
+    // objectives and leaving it there.
     const strength = {};
+    const armour = {};
     for (const e of inside) {
-      // A tank sitting on a flag holds it but cannot take it from infantry.
-      const weight = e.kind === KIND.VEHICLE ? 0.5 : (1 - clamp(e.suppression, 0, 1) * 0.7);
-      strength[e.faction] = (strength[e.faction] || 0) + weight;
+      if (e.kind === KIND.VEHICLE) { armour[e.faction] = (armour[e.faction] || 0) + 1; continue; }
+      strength[e.faction] = (strength[e.faction] || 0) + (1 - clamp(e.suppression, 0, 1) * 0.7);
     }
     const sides = Object.entries(strength).filter(([, v]) => v > 0.05).sort((a, b) => b[1] - a[1]);
 
@@ -36,6 +40,9 @@ export function stepCapture(battle, dt) {
       continue;
     }
     const [side, power] = sides[0];
+    // Somebody else's armour sitting on it stops the work, even with nobody
+    // else on foot to argue.
+    if (Object.keys(armour).some((a) => a !== side)) { f.contestedBy = 'both'; continue; }
     f.contestedBy = side === f.owner ? null : side;
 
     if (side === f.owner) {
